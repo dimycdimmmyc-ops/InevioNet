@@ -1,0 +1,24 @@
+7. data/
+====================================================================================================
+
+data\p2_inbox.json  (2 B)
+    array of 0
+data\seed.log  (56 B)
+data\seed.log.err  (961 B)
+data\spores_findings.json  (58.93 KB)
+    keys: 04:ba:d6:a3:58:cb, 04:ba:d6:a3:58:ca, e4:18:6b:20:d5:1c, 88:bd:09:30:6a:e9, bc:0f:9a:88:a7:12, 0a:27:22:f1:0d:d1, bc:0f:9a:88:a7:10, 3c:98:72:32:03:2a, 06:27:22:f1:0d:d1, 00:ad:24:96:15:90, 50:ff:20:f6:a1:5f, 88:76:b9:53:e5:ab, 78:a3:51:7b:27:da, 80:af:ca:91:61:61, 52:ff:20:f6:a1:5f, 50:ff:20:09:05:30, 74:fe:ce:3e:a8:1a, 82:15:a2:4f:0a:14, 82:15:a2:4f:0a:15, 88:bd:09:30:6a:e4, 00:27:22:f1:0d:d1, d4:9c:53:02:05:ae, a0:a3:f0:f2:8e:9e, 04-ba-d6-a3-58-cb, e4-18-6b-20-d5-1c, 00-27-22-f1-0d-d1, 0a-27-22-f1-0d-d1, bc-0f-9a-88-a7-10, bc-0f-9a-88-a7-12, 3c-98-72-32-03-2a, 04-ba-d6-a3-58-ca, 50-ff-20-f6-a1-5f, 88-bd-09-30-6a-e9, 88-bd-09-30-6a-e4, 74-fe-ce-3e-a8-1a, 06-27-22-f1-0d-d1, 50-ff-20-09-05-30, d4-9c-53-02-05-ae, ssid_MTS_Router_5_376474, ssid_MTSRouter_2_4GHz_001182, ssid_Netcraze_7321, ssid_Keenetic_9494, ssid_MTS_Router_376474, ssid_MTSRouter_58C5, ssid_MTSRouter_5G_58C5, ssid_unit, ssid_22129, ssid_netis_306AE2, ssid_sweethome, ssid_Keenetic_9187, ssid_________________________________, ssid_MTSRouter_E5A6, ssid_ZyXEL_KEENETIC_OMNI_II_7B27DA, ssid_TP_Link_A81A, ssid_Keenetic_6028, ssid_Cudy_6161, ssid_AKBEROV_32, ssid_W60_51a24488a74e, ssid_Galaxy_A12EB45, ssid_Keenetic_2570, ssid_netis_306AE2_5G, ssid_TP_Link, ssid_sana, ssid_MTSRouter_04CF, ssid_MTSRouter_2.4GHz_001182, ssid_Keenetic-9494, ssid_Keenetic:9494, ssid_╨в╨╕╨┐ ╤Б╨╡╤В╨╕:                 ╨Ш╨╜╤Д╤А╨░╤Б╤В╤А╤Г╨║╤В╤Г╤А╨░, ssid_╨в╨╕╨┐ ╤Б╨╡╤В╨╕-                 ╨Ш╨╜╤Д╤А╨░╤Б╤В╤А╤Г╨║╤В╤Г╤А╨░, ssid_netis-306AE2, ssid_netis:306AE2, ssid_TP-Link_A81A, ssid_TP:Link_A81A, ssid_Keenetic-9187, ssid_Keenetic:9187, ssid_TP-Link, ssid_TP:Link, ssid_Keenetic-2570, ssid_Keenetic:2570, ssid_Keenetic-6028, ssid_Keenetic:6028, ssid_╨Ю╨╗╨╡╤Б╤П, ssid_realme C75 8f43, ssid_Netcraze-7321, ssid_Netcraze:7321, ssid_Infinix SMART 6, ssid_netis-306AE2-5G, ssid_netis:306AE2:5G, ssid_DIR-815S-8E9B, ssid_DIR:815S:8E9B, ssid_Cudy-6161, ssid_Cudy:6161, ssid_MTS_Router_369383, 52:ff:20:7b:a0:b3, 52-ff-20-7b-a0-b3, 78-a3-51-7b-27-da, 24:5a:4c:06:dd:11, 24-5a-4c-06-dd-11, 88-76-b9-53-e5-ab, 82-15-a2-4f-0a-14, 50:ff:20:6b:a0:b3, 50-ff-20-6b-a0-b3, 00:27:22:f1:0c:99, 00-27-22-f1-0c-99, 52-ff-20-f6-a1-5f, 06:27:22:f1:0c:99, 06-27-22-f1-0c-99, 72:f6:24:80:c9:3a, 72-f6-24-80-c9-3a, 32:16:9d:22:87:3c, 32-16-9d-22-87-3c, 0a:27:22:f1:0c:99, 0a-27-22-f1-0c-99, c2:c9:e3:3a:aa:23, c2-c9-e3-3a-aa-23, d6:9c:53:72:05:ae, d6-9c-53-72-05-ae, 80-af-ca-91-61-61, 30:16:9d:12:87:3c, 30-16-9d-12-87-3c, 8c:90:2d:bf:bd:a2, 8c-90-2d-bf-bd-a2, 6e:1e:d8:45:c3:c2, 6e-1e-d8-45-c3-c2, ca:40:26:26:69:82, ca-40-26-26-69-82, d0:32:c3:2c:04:d4, d0-32-c3-2c-04-d4, b8:59:c8:06:4a:1b, b8-59-c8-06-4a-1b, bc:0f:9a:82:76:62, bc-0f-9a-82-76-62, c0:c9:e3:3a:aa:23, c0-c9-e3-3a-aa-23, 82-15-a2-4f-0a-15, 08:bf:b8:b6:ca:b0, 08-bf-b8-b6-ca-b0, 90:f6:52:72:a9:26, 90-f6-52-72-a9-26, 42:0c:f7:89:4a:d2, 42-0c-f7-89-4a-d2, 40:ae:30:3c:30:5e, 40-ae-30-3c-30-5e, 46:29:1e:a1:3c:b1, 46-29-1e-a1-3c-b1, 02:08:22:94:0b:fc, 02-08-22-94-0b-fc, 50:ff:20:e9:ff:9f, 50-ff-20-e9-ff-9f, bc:0f:9a:87:3e:5a, bc-0f-9a-87-3e-5a, 04:4a:69:34:e5:5e, 04-4a-69-34-e5-5e, fe:50:80:4a:ad:eb, fe-50-80-4a-ad-eb, 3c:98:72:32:03:2b, 3c-98-72-32-03-2b, 1c:61:b4:eb:da:6c, 1c-61-b4-eb-da-6c, 74:da:88:2f:e0:1a, 74-da-88-2f-e0-1a, d4:60:e3:29:21:fc, d4-60-e3-29-21-fc
+data\super_nodes.json  (3.11 KB)
+    keys: wifi_ssid_unit, wifi_ssid_22129, wifi_ssid_Keenetic_9187, wifi_ssid_MTSRouter_E5A6, wifi_ssid_ZyXEL_KEENETIC_OMNI_II_7B27DA, wifi_ssid_TP_Link_A81A, wifi_ssid_Keenetic_6028, wifi_ssid_Keenetic_2570, wifi_ssid_MTSRouter_5G_58C5, wifi_ssid_Cudy_6161, wifi_ssid_AKBEROV_32
+data\tls\cert.pem  (1.06 KB)
+data\tls\key.pem  (1.64 KB)
+data\web_state.json  (567 B)
+    keys: footholds
+
+====================================================================================================
+  8. ЛОГИ
+====================================================================================================
+
+(нет logs/)
+
+====================================================================================================
+  

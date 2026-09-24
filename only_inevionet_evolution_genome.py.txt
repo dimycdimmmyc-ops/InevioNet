@@ -1,0 +1,245 @@
+--- [122/293] inevionet\evolution\genome.py  (9.47 KB) ---
+
+"""InevioNet Protocol Genome - геном протокола."""
+import random
+import copy
+import time
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass, field
+
+from ..core.crypto import random_id
+
+
+@dataclass
+class ProtocolGenome:
+    """
+    Геном протокола - набор эволюционирующих параметров.
+    Каждый ген влияет на скорость, надёжность, скрытность.
+    """
+    genome_id: str = ""
+    protocol_name: str = "TCP"
+    generation: int = 0
+    parent_ids: List[str] = field(default_factory=list)
+
+    speed: float = 0.5
+    reliability: float = 0.5
+    stealth: float = 0.5
+    efficiency: float = 0.5
+    adaptability: float = 0.5
+
+    packet_size: int = 1400
+    ttl: int = 25
+    priority: int = 5
+    clone_threshold: int = 3
+
+    penetration_strategy: str = "HTTP_Tunneling"
+    masking_channel: str = "HTTP"
+    industrial_protocol: str = "MQTT"
+    stego_method: str = "HTTP_HEADERS"
+    use_polymorphic: bool = False
+    use_ambient: bool = False
+    use_stego: bool = False
+
+    # P16: capsule genes
+    capsule_strategy: str = "minimal"
+    capsule_deploy_method: str = "auto"
+    capsule_fragment_size: int = 32768
+    capsule_channel: str = "DNS"
+    capsule_spawn_depth: int = 2
+    capsule_targets_per_cycle: int = 5
+
+    fitness: float = 0.0
+    mutation_rate: float = 0.01
+    history: List[float] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.genome_id:
+            self.genome_id = random_id("gen", 6)
+        if not self.history:
+            self.history = []
+        if self.fitness == 0.0:
+            self.calculate_fitness()
+
+    def calculate_fitness(self, weights: Optional[Dict[str, float]] = None) -> float:
+        """Вычислить приспособленность генома."""
+        weights = weights or {
+            "speed": 0.25,
+            "reliability": 0.30,
+            "stealth": 0.20,
+            "efficiency": 0.15,
+            "adaptability": 0.10,
+        }
+        score = 0.0
+        score += self.speed * weights.get("speed", 0.25)
+        score += self.reliability * weights.get("reliability", 0.30)
+        score += self.stealth * weights.get("stealth", 0.20)
+        score += self.efficiency * weights.get("efficiency", 0.15)
+        score += self.adaptability * weights.get("adaptability", 0.10)
+
+        size_factor = 1.0 - abs(self.packet_size - 1400) / 1400
+        score += max(0, size_factor) * 0.05
+
+        ttl_factor = min(1.0, self.ttl / 40)
+        score += ttl_factor * 0.03
+
+        priority_factor = 1.0 - abs(self.priority - 7) / 10
+        score += max(0, priority_factor) * 0.02
+
+        self.fitness = min(1.0, max(0.0, score))
+        self.history.append(self.fitness)
+        if len(self.history) > 100:
+            self.history = self.history[-100:]
+        return self.fitness
+
+    def mutate(self, strength: float = 1.0) -> "ProtocolGenome":
+        """Мутировать геном."""
+        self.generation += 1
+        self.parent_ids = [self.genome_id]
+
+        for gene in ["speed", "reliability", "stealth", "efficiency", "adaptability"]:
+            if random.random() < self.mutation_rate * strength:
+                delta = random.gauss(0, 0.1 * strength)
+                current = getattr(self, gene)
+                new_value = max(0.0, min(1.0, current + delta))
+                setattr(self, gene, new_value)
+
+        if random.random() < self.mutation_rate * strength:
+            delta = int(random.gauss(0, 100 * strength))
+            self.packet_size = max(64, min(9000, self.packet_size + delta))
+
+        if random.random() < self.mutation_rate * strength:
+            delta = int(random.gauss(0, 3 * strength))
+            self.ttl = max(1, min(64, self.ttl + delta))
+
+        if random.random() < self.mutation_rate * strength:
+            delta = int(random.gauss(0, 1 * strength))
+            self.priority = max(1, min(10, self.priority + delta))
+
+        if random.random() < self.mutation_rate * strength:
+            delta = int(random.gauss(0, 1 * strength))
+            self.clone_threshold = max(1, min(10, self.clone_threshold + delta))
+
+        if random.random() < 0.01:
+            self.mutation_rate *= random.uniform(0.8, 1.2)
+            self.mutation_rate = max(0.001, min(0.1, self.mutation_rate))
+
+        self.genome_id = random_id("gen", 6)
+        self.calculate_fitness()
+        return self
+
+    def crossover(self, partner: "ProtocolGenome") -> "ProtocolGenome":
+        """Скрещивание с другим геномом."""
+        child = ProtocolGenome(
+            protocol_name=self.protocol_name,
+            generation=max(self.generation, partner.generation) + 1,
+            parent_ids=[self.genome_id, partner.genome_id],
+        )
+        for gene in ["speed", "reliability", "stealth", "efficiency", "adaptability"]:
+            avg = (getattr(self, gene) + getattr(partner, gene)) / 2
+            noise = random.gauss(0, 0.05)
+            setattr(child, gene, max(0.0, min(1.0, avg + noise)))
+
+        child.packet_size = random.choice([self.packet_size, partner.packet_size])
+        child.ttl = random.choice([self.ttl, partner.ttl])
+        child.priority = random.choice([self.priority, partner.priority])
+        child.clone_threshold = random.choice([self.clone_threshold, partner.clone_threshold])
+        child.mutation_rate = (self.mutation_rate + partner.mutation_rate) / 2
+        child.calculate_fitness()
+        return child
+
+    def copy(self) -> "ProtocolGenome":
+        return copy.deepcopy(self)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "genome_id": self.genome_id, "protocol_name": self.protocol_name,
+            "generation": self.generation, "parent_ids": self.parent_ids,
+            "speed": self.speed, "reliability": self.reliability,
+            "stealth": self.stealth, "efficiency": self.efficiency,
+            "adaptability": self.adaptability, "packet_size": self.packet_size,
+            "ttl": self.ttl, "priority": self.priority,
+            "clone_threshold": self.clone_threshold, "fitness": self.fitness,
+            "mutation_rate": self.mutation_rate,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProtocolGenome":
+        return cls(
+            genome_id=data.get("genome_id", ""),
+            protocol_name=data.get("protocol_name", "TCP"),
+            generation=data.get("generation", 0),
+            parent_ids=data.get("parent_ids", []),
+            speed=data.get("speed", 0.5), reliability=data.get("reliability", 0.5),
+            stealth=data.get("stealth", 0.5), efficiency=data.get("efficiency", 0.5),
+            adaptability=data.get("adaptability", 0.5),
+            packet_size=data.get("packet_size", 1400), ttl=data.get("ttl", 25),
+            priority=data.get("priority", 5),
+            clone_threshold=data.get("clone_threshold", 3),
+            mutation_rate=data.get("mutation_rate", 0.01),
+        )
+
+    def __repr__(self):
+        return (f"ProtocolGenome({self.genome_id}, gen={self.generation}, "
+                f"fitness={self.fitness:.3f})")
+
+    def __lt__(self, other):
+        return self.fitness < other.fitness
+
+
+def create_random_genome(protocol_name: str = "TCP") -> ProtocolGenome:
+    return ProtocolGenome(
+        protocol_name=protocol_name,
+        speed=random.uniform(0.3, 0.9),
+        reliability=random.uniform(0.3, 0.9),
+        stealth=random.uniform(0.3, 0.9),
+        efficiency=random.uniform(0.3, 0.9),
+        adaptability=random.uniform(0.3, 0.9),
+        packet_size=random.randint(500, 2000),
+        ttl=random.randint(10, 40),
+        priority=random.randint(1, 10),
+        clone_threshold=random.randint(1, 7),
+        mutation_rate=random.uniform(0.005, 0.03),
+    )
+
+
+def create_from_protocol(protocol_name: str) -> ProtocolGenome:
+    PROTO_COEFFS = {
+        "TCP": {"speed": 0.7, "reliability": 0.9, "stealth": 0.4, "efficiency": 0.7},
+        "UDP": {"speed": 0.9, "reliability": 0.5, "stealth": 0.6, "efficiency": 0.8},
+        "ICMP": {"speed": 0.6, "reliability": 0.5, "stealth": 0.9, "efficiency": 0.6},
+        "DNS": {"speed": 0.5, "reliability": 0.7, "stealth": 0.95, "efficiency": 0.7},
+        "HTTPS": {"speed": 0.6, "reliability": 0.95, "stealth": 0.7, "efficiency": 0.8},
+        "WebSocket": {"speed": 0.8, "reliability": 0.9, "stealth": 0.6, "efficiency": 0.9},
+    }
+    coeffs = PROTO_COEFFS.get(protocol_name.upper(), {})
+    return ProtocolGenome(
+        protocol_name=protocol_name,
+        speed=coeffs.get("speed", 0.5),
+        reliability=coeffs.get("reliability", 0.5),
+        stealth=coeffs.get("stealth", 0.5),
+        efficiency=coeffs.get("efficiency", 0.5),
+        adaptability=0.5,
+    )
+
+
+if __name__ == "__main__":
+    print("Testing ProtocolGenome...")
+    g = ProtocolGenome()
+    print(f"Created: {g}")
+    print(f"Fitness: {g.fitness:.3f}")
+    old_id = g.genome_id
+    g.mutate()
+    print(f"After mutate: id changed = {old_id != g.genome_id}, gen={g.generation}")
+    p1 = create_random_genome("TCP")
+    p2 = create_random_genome("UDP")
+    child = p1.crossover(p2)
+    print(f"Child: {child}")
+    print(f"Child parents: {child.parent_ids}")
+    d = child.to_dict()
+    restored = ProtocolGenome.from_dict(d)
+    assert restored.genome_id == child.genome_id
+    print("OK: serialization works")
+    print("ProtocolGenome module OK")
+
+
+

@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "built_at": 1789728954.5253851,
+  "include": [
+    "core",
+    "network",
+    "mycelium",
+    "evolution",
+    "steganography",
+    "masking",
+    "identity"
+  ],
+  "host": "HOME-PC"
+}

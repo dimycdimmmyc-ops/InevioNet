@@ -1,0 +1,183 @@
+--- [158/293] inevionet\network\arp_scanner.py  (5.44 KB) ---
+
+"""P22: ARP scanner - discover devices in local network."""
+import re
+import sys
+import subprocess
+from typing import List, Dict, Any
+from ..core.logger import get_logger
+
+logger = get_logger("inevionet.network.arp_scanner")
+
+# P25: ping sweep
+def ping_sweep(subnet: str = None, timeout: float = 0.3,
+               max_workers: int = 64) -> int:
+    """P25: ping all hosts in subnet to populate ARP table.
+
+    Returns number of responding hosts.
+    """
+    import subprocess
+    import socket
+    import concurrent.futures
+
+    # Auto-detect subnet
+    if subnet is None:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            subnet = ".".join(local_ip.split(".")[:3])
+        except Exception:
+            subnet = "192.168.1"
+
+    logger.info("[Sweep] pinging %s.1-254 ...", subnet)
+
+    def ping_one(i):
+        ip = f"{subnet}.{i}"
+        try:
+            if sys.platform == "win32":
+                # Windows ping
+                r = subprocess.run(
+                    ["ping", "-n", "1", "-w", str(int(timeout * 1000)), ip],
+                    capture_output=True, timeout=2,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                return r.returncode == 0
+            else:
+                r = subprocess.run(
+                    ["ping", "-c", "1", "-W", str(int(timeout)), ip],
+                    capture_output=True, timeout=2,
+                )
+                return r.returncode == 0
+        except Exception:
+            return False
+
+    alive = 0
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            results = list(ex.map(ping_one, range(1, 255)))
+        alive = sum(1 for r in results if r)
+        logger.info("[Sweep] alive: %d/254", alive)
+    except Exception as e:
+        logger.error("[Sweep] error: %s", e)
+
+    # Small delay to let ARP table settle
+    import time as _t
+    _t.sleep(0.5)
+
+    return alive
+
+
+# P23: cache
+_arp_cache: List[Dict[str, Any]] = []
+_arp_cache_time: float = 0.0
+_ARP_CACHE_TTL: float = 30.0
+
+
+def scan_arp(force: bool = False) -> List[Dict[str, Any]]:
+    """P22/P23: scan local network via ARP table (cached 30s).
+
+    Returns list of {ip, mac, type, vendor}.
+    """
+    global _arp_cache, _arp_cache_time
+    import time as _t
+    now = _t.time()
+    if not force and _arp_cache and (now - _arp_cache_time) < _ARP_CACHE_TTL:
+        return list(_arp_cache)
+
+    # P25: auto ping sweep every 4 calls (with cache miss)
+    global _arp_sweep_counter
+    try:
+        _arp_sweep_counter
+    except NameError:
+        _arp_sweep_counter = 0
+
+    _arp_sweep_counter += 1
+    if _arp_sweep_counter % 4 == 1:
+        try:
+            ping_sweep()
+        except Exception:
+            pass
+
+    results = []
+    try:
+        if sys.platform == "win32":
+            r = subprocess.run(
+                ["arp", "-a"],
+                capture_output=True, timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            try:
+                raw = r.stdout.decode("cp866", errors="replace")
+            except Exception:
+                raw = r.stdout.decode("utf-8", errors="replace")
+        else:
+            r = subprocess.run(
+                ["arp", "-an"],
+                capture_output=True, timeout=10,
+            )
+            raw = r.stdout.decode("utf-8", errors="replace")
+
+        # Parse lines like:
+        #   192.168.1.1    04-ba-d6-a3-58-c5     dynamic
+        #   192.168.1.100  aa:bb:cc:dd:ee:ff     dynamic
+        for line in raw.splitlines():
+            # Match IP + MAC
+            m = re.match(
+                r"\s*(\d+\.\d+\.\d+\.\d+)\s+"
+                r"([0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-]"
+                r"[0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2})",
+                line)
+            if not m:
+                continue
+            ip = m.group(1)
+            mac = m.group(2).replace("-", ":").lower()
+
+            # Skip broadcast/multicast
+            if ip.endswith(".255") or ip.startswith("224.") or ip.startswith("239."):
+                continue
+            if mac.startswith("ff:ff:ff") or mac.startswith("01:00:5e"):
+                continue
+
+            # Guess type by IP
+            if ip.endswith(".1"):
+                ntype = "router"
+            elif ip.endswith(".255"):
+                ntype = "broadcast"
+            else:
+                ntype = "device"
+
+            results.append({
+                "ip": ip,
+                "mac": mac,
+                "type": ntype,
+                "vendor": "unknown",
+            })
+
+        _arp_cache = list(results)
+        _arp_cache_time = _t.time()
+        logger.info("[ARP] found %d devices (fresh)", len(results))
+    except Exception as e:
+        logger.error("[ARP] scan error: %s", e)
+
+    return results
+
+
+def find_ip_by_mac(mac: str) -> str:
+    """P22: find IP by MAC from ARP table."""
+    mac = mac.lower().replace("-", ":")
+    for dev in scan_arp():
+        if dev["mac"] == mac:
+            return dev["ip"]
+    return ""
+
+
+if __name__ == "__main__":
+    devices = scan_arp()
+    print(f"Found {len(devices)} devices:")
+    for d in devices:
+        print(f"  {d['ip']:20s} {d['mac']:20s} {d['type']}")
+
+
+

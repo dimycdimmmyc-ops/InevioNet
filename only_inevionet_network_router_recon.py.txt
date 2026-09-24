@@ -1,0 +1,222 @@
+--- [169/293] inevionet\network\router_recon.py  (8.40 KB) ---
+
+"""P24: Router reconnaissance - fingerprint and identify firmware."""
+import re
+import socket
+import urllib.request
+import ssl
+from typing import Dict, Any, Optional
+from ..core.logger import get_logger
+
+logger = get_logger("inevionet.network.router_recon")
+
+
+# MAC OUI → vendor
+OUI_MAP = {
+    # MikroTik
+    "4c:5e:0c": "MikroTik", "6c:3b:6b": "MikroTik", "74:4d:28": "MikroTik",
+    "78:9a:18": "MikroTik", "dc:2c:6e": "MikroTik", "e4:8d:8c": "MikroTik",
+    # Keenetic (Zyxel)
+    "50:ff:20": "Keenetic", "54:6c:0e": "Keenetic", "70:6b:b9": "Keenetic",
+    # ASUS
+    "04:d4:c4": "ASUS", "2c:56:dc": "ASUS", "38:d5:47": "ASUS",
+    "50:46:5d": "ASUS", "ac:9e:17": "ASUS", "b0:6e:bf": "ASUS",
+    # TP-Link
+    "14:cc:20": "TP-Link", "50:c7:bf": "TP-Link", "a4:2b:b0": "TP-Link",
+    "b0:4e:26": "TP-Link", "ec:08:6b": "TP-Link",
+    # Xiaomi
+    "28:d1:27": "Xiaomi", "34:ce:00": "Xiaomi", "50:64:2b": "Xiaomi",
+    "64:09:80": "Xiaomi", "78:11:dc": "Xiaomi",
+    # Tenda
+    "c8:3a:35": "Tenda", "d8:32:14": "Tenda",
+    # Netis
+    "10:13:31": "Netis", "28:76:cd": "Netis",
+    # Huawei
+    "00:e0:fc": "Huawei", "28:6e:d4": "Huawei", "8c:34:fd": "Huawei",
+    # Zyxel
+    "00:13:49": "Zyxel", "5c:f4:ab": "Zyxel",
+    # Netgear
+    "20:e5:2a": "Netgear", "a0:40:a0": "Netgear", "c4:04:15": "Netgear",
+    # D-Link
+    "14:d6:4d": "D-Link", "1c:7e:e5": "D-Link", "3c:1e:04": "D-Link",
+    # P26: extended OUI
+    "88:76:b9": "Keenetic",  # встречалось в твоих логах
+    "d4:60:e3": "Unknown",
+    "50:ff:20": "Keenetic",
+    "3c:98:72": "Unknown",
+    "04:ba:d6": "Unknown",   # твой роутер 192.168.1.1
+}
+
+
+def get_vendor_by_mac(mac: str) -> str:
+    """P24: vendor by MAC OUI."""
+    mac = mac.lower().replace("-", ":")
+    prefix = ":".join(mac.split(":")[:3])
+    return OUI_MAP.get(prefix, "unknown")
+
+
+def http_fingerprint(ip: str, port: int = 80, timeout: float = 3.0) -> Dict[str, Any]:
+    """P24: get HTTP headers."""
+    result = {"reachable": False, "server": "", "www_auth": "", "body_hint": ""}
+    try:
+        url = f"http://{ip}:{port}/"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            result["reachable"] = True
+            result["server"] = r.headers.get("Server", "")
+            result["www_auth"] = r.headers.get("WWW-Authenticate", "")
+            body = r.read(2000).decode("utf-8", errors="replace")
+            # Look for firmware hints
+            # P26: extended body check
+            body_lower = body.lower()
+            if "routeros" in body_lower or "mikrotik" in body_lower:
+                result["body_hint"] = "RouterOS"
+            elif "keenetic" in body_lower:
+                result["body_hint"] = "Keenetic"
+            elif "luci" in body_lower or "openwrt" in body_lower:
+                result["body_hint"] = "OpenWrt"
+            elif "asuswrt" in body_lower or "asus" in body_lower:
+                result["body_hint"] = "ASUS"
+            elif "tp-link" in body_lower or "tplink" in body_lower:
+                result["body_hint"] = "TP-Link"
+            elif "zyxel" in body_lower:
+                result["body_hint"] = "Zyxel"
+            elif "tenda" in body_lower:
+                result["body_hint"] = "Tenda"
+            elif "d-link" in body_lower or "dlink" in body_lower:
+                result["body_hint"] = "D-Link"
+            elif "netis" in body_lower:
+                result["body_hint"] = "Netis"
+            elif "netgear" in body_lower:
+                result["body_hint"] = "Netgear"
+    except Exception as e:
+        logger.debug("[Recon] http %s:%d: %s", ip, port, e)
+    return result
+
+
+def port_scan(ip: str, ports: list, timeout: float = 1.5) -> Dict[int, bool]:
+    """P24: check open ports."""
+    result = {}
+    for port in ports:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            r = s.connect_ex((ip, port))
+            s.close()
+            result[port] = (r == 0)
+        except Exception:
+            result[port] = False
+    return result
+
+
+def identify_firmware(ip: str, mac: str = "") -> Dict[str, Any]:
+    """P24: identify router firmware/model."""
+    info = {
+        "ip": ip,
+        "mac": mac,
+        "vendor": get_vendor_by_mac(mac) if mac else "unknown",
+        "firmware": "unknown",
+        "ssh_open": False,
+        "http_open": False,
+        "https_open": False,
+        "open_ports": [],
+        "server_header": "",
+        "deploy_method": "unknown",
+        "can_deploy": False,
+        "notes": "",
+    }
+
+    # Port scan
+    ports = [22, 23, 80, 443, 8080, 8443]
+    port_results = port_scan(ip, ports)
+
+    info["ssh_open"] = port_results.get(22, False)
+    info["http_open"] = port_results.get(80, False)
+    info["https_open"] = port_results.get(443, False)
+    info["open_ports"] = [p for p, ok in port_results.items() if ok]
+
+    # HTTP fingerprint (P26: try 80, then 443, then 8080)
+    if info["http_open"]:
+        fp = http_fingerprint(ip, 80)
+    elif info["https_open"]:
+        # P26: HTTPS fallback
+        try:
+            import ssl as _ssl
+            ctx = _ssl._create_unverified_context()
+            url = f"https://{ip}/"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=3, context=ctx) as r:
+                fp = {
+                    "reachable": True,
+                    "server": r.headers.get("Server", ""),
+                    "body_hint": "",
+                }
+                body = r.read(2000).decode("utf-8", errors="replace").lower()
+                for hint, name in [("routeros", "RouterOS"), ("keenetic", "Keenetic"),
+                                    ("luci", "OpenWrt"), ("asuswrt", "ASUS")]:
+                    if hint in body:
+                        fp["body_hint"] = name
+                        break
+        except Exception:
+            fp = {"reachable": False, "server": "", "body_hint": ""}
+    else:
+        fp = {"reachable": False, "server": "", "body_hint": ""}
+
+    if info["http_open"] or info["https_open"]:
+        info["server_header"] = fp.get("server", "")
+        hint = fp.get("body_hint", "")
+        if hint:
+            info["firmware"] = hint
+        elif "RouterOS" in fp.get("server", ""):
+            info["firmware"] = "RouterOS"
+        elif "nginx" in fp.get("server", "").lower():
+            info["firmware"] = "Linux (nginx)"
+        elif "Keenetic" in fp.get("www_auth", ""):
+            info["firmware"] = "Keenetic"
+
+    # Determine strategy
+    if info["firmware"] == "RouterOS" or info["vendor"] == "MikroTik":
+        info["deploy_method"] = "ssh_mikrotik"
+        info["can_deploy"] = info["ssh_open"]
+        info["notes"] = "MikroTik: container package required"
+    elif info["firmware"] == "Keenetic" or info["vendor"] == "Keenetic":
+        info["deploy_method"] = "ssh_keenetic"
+        info["can_deploy"] = info["ssh_open"]
+        info["notes"] = "Keenetic: install Entware (opkg)"
+    elif info["firmware"] == "OpenWrt":
+        info["deploy_method"] = "ssh_openwrt"
+        info["can_deploy"] = info["ssh_open"]
+        info["notes"] = "OpenWrt: opkg install python3"
+    elif info["firmware"] == "ASUS" or info["vendor"] == "ASUS":
+        info["deploy_method"] = "ssh_asus_merlin"
+        info["can_deploy"] = info["ssh_open"]
+        info["notes"] = "ASUS: Merlin firmware + Entware"
+    elif info["vendor"] == "TP-Link":
+        info["deploy_method"] = "skip"
+        info["can_deploy"] = False
+        info["notes"] = "TP-Link: closed firmware, no deploy"
+    elif info["vendor"] == "Tenda":
+        info["deploy_method"] = "skip"
+        info["can_deploy"] = False
+        info["notes"] = "Tenda: closed firmware"
+    else:
+        info["deploy_method"] = "unknown"
+        info["can_deploy"] = False
+        info["notes"] = "Unknown router, manual check needed"
+
+    logger.info("[Recon] %s: vendor=%s firmware=%s deploy=%s can=%s",
+                ip, info["vendor"], info["firmware"],
+                info["deploy_method"], info["can_deploy"])
+    return info
+
+
+if __name__ == "__main__":
+    import sys
+    ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.1"
+    mac = sys.argv[2] if len(sys.argv) > 2 else ""
+    info = identify_firmware(ip, mac)
+    import json
+    print(json.dumps(info, indent=2))
+
+
+

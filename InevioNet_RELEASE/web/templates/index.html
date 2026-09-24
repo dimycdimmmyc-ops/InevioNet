@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InevioNet</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --bg-1:#0a0e27; --bg-2:#000428;
+  --glass:rgba(28,28,30,0.72);
+  --glass-2:rgba(44,44,46,0.72);
+  --blue:#0a84ff; --green:#30d158; --red:#ff453a;
+  --yellow:#ffd60a; --pink:#ff375f; --orange:#ff9f0a;
+  --text:#fff; --dim:rgba(235,235,245,0.6);
+  --separator:rgba(84,84,88,0.65);
+}
+body {
+  background:radial-gradient(ellipse at center,var(--bg-1) 0%,var(--bg-2) 55%,#000 100%);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",system-ui,sans-serif;
+  overflow:hidden; height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+#starry-sky { position:fixed; inset:0; z-index:1; cursor:grab; }
+#starry-sky:active { cursor:grabbing; }
+.sidebar {
+  position:fixed; left:0; top:0;
+  width:400px; max-width:100vw; height:100vh;
+  background:var(--glass);
+  backdrop-filter:blur(40px) saturate(180%);
+  -webkit-backdrop-filter:blur(40px) saturate(180%);
+  border-right:1px solid var(--separator);
+  overflow-y:auto; z-index:100; padding:20px 16px 100px;
+  transition:transform 0.4s cubic-bezier(0.32,0.72,0,1);
+}
+.sidebar::-webkit-scrollbar { width:4px; }
+.sidebar::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:2px; }
+.app-header { text-align:center; padding:8px 0 20px; }
+.app-title {
+  font-size:2em; font-weight:700;
+  background:linear-gradient(135deg,#64d2ff,#0a84ff,#bf5af2);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text; letter-spacing:-0.5px;
+}
+.app-subtitle { color:var(--dim); font-size:0.82em; margin-top:4px; font-style:italic; }
+.status-bar {
+  display:flex; align-items:center; justify-content:center;
+  gap:8px; margin-top:12px; font-size:0.85em; color:var(--dim);
+}
+.dot { width:10px; height:10px; border-radius:50%; background:var(--red); transition:all 0.3s; }
+.dot.on { background:var(--green); box-shadow:0 0 12px var(--green); }
+.card {
+  background:var(--glass-2);
+  backdrop-filter:blur(30px) saturate(180%);
+  -webkit-backdrop-filter:blur(30px) saturate(180%);
+  border-radius:20px; padding:16px; margin-bottom:14px;
+  border:0.5px solid var(--separator); transition:transform 0.2s;
+}
+.card:active { transform:scale(0.98); }
+.card-title {
+  font-size:1.05em; font-weight:600; margin-bottom:12px;
+  display:flex; align-items:center; gap:8px; color:var(--text);
+}
+.card-title .emoji { font-size:1.3em; }
+.btn {
+  width:100%; padding:14px 16px;
+  border:none; border-radius:14px;
+  font-size:1em; font-weight:600; font-family:inherit;
+  cursor:pointer; margin-bottom:8px;
+  transition:all 0.2s cubic-bezier(0.32,0.72,0,1);
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.btn:active { transform:scale(0.96); opacity:0.85; }
+.btn-primary { background:linear-gradient(135deg,#0a84ff,#0066cc); color:#fff; box-shadow:0 4px 16px rgba(10,132,255,0.4); }
+.btn-success { background:linear-gradient(135deg,#30d158,#28b04a); color:#fff; box-shadow:0 4px 16px rgba(48,209,88,0.4); }
+.btn-danger { background:linear-gradient(135deg,#ff453a,#cc372e); color:#fff; box-shadow:0 4px 16px rgba(255,69,58,0.4); }
+.btn-glass { background:rgba(120,120,128,0.24); color:var(--text); border:0.5px solid var(--separator); }
+.btn-glass:hover { background:rgba(120,120,128,0.36); }
+.btn-sm { width:auto; padding:8px 14px; font-size:0.85em; border-radius:10px; margin-bottom:0; display:inline-flex; margin-right:6px; }
+.form-group { margin-bottom:12px; }
+label { display:block; color:var(--dim); font-size:0.82em; font-weight:500; margin-bottom:6px; }
+input, textarea, select {
+  width:100%; padding:12px 14px;
+  background:rgba(120,120,128,0.18);
+  border:0.5px solid var(--separator);
+  border-radius:12px; color:var(--text);
+  font-family:inherit; font-size:1em; transition:all 0.2s;
+}
+input:focus, textarea:focus, select:focus {
+  outline:none; border-color:var(--blue); background:rgba(10,132,255,0.1);
+}
+.user-bar {
+  display:flex; justify-content:space-between; align-items:center;
+  background:rgba(10,132,255,0.15);
+  border:0.5px solid rgba(10,132,255,0.4);
+  padding:12px 16px; border-radius:14px; margin-bottom:14px;
+}
+#currentUsername { font-weight:600; }
+.user-node { color:var(--dim); font-size:0.75em; font-family:monospace; }
+.auth-screen {
+  position:fixed; inset:0;
+  background:rgba(0,0,0,0.85);
+  backdrop-filter:blur(20px);
+  z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.auth-card {
+  background:var(--glass); backdrop-filter:blur(40px) saturate(180%);
+  border:0.5px solid var(--separator); border-radius:24px; padding:32px 24px;
+  max-width:400px; width:100%;
+}
+.auth-tabs { display:flex; gap:8px; margin:16px 0; background:rgba(120,120,128,0.18); padding:4px; border-radius:12px; }
+.tab-btn {
+  flex:1; padding:10px; background:transparent; border:none;
+  color:var(--dim); cursor:pointer; border-radius:10px;
+  font-weight:600; font-size:0.9em; transition:all 0.2s;
+}
+.tab-btn.active { background:var(--blue); color:#fff; }
+.stats-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.stat-card {
+  background:rgba(120,120,128,0.16); padding:14px 12px;
+  border-radius:14px; text-align:center; border:0.5px solid var(--separator);
+}
+.stat-label { display:block; color:var(--dim); font-size:0.75em; margin-bottom:6px; }
+.stat-value { display:block; font-size:1.6em; font-weight:700; letter-spacing:-1px; }
+.stat-value.ok { color:var(--green); }
+.stat-value.err { color:var(--red); }
+.stat-value.my { color:var(--pink); }
+.stat-value.blue { color:var(--blue); }
+.stat-value.yellow { color:var(--yellow); }
+.log-container {
+  height:180px; background:rgba(0,0,0,0.5);
+  border:0.5px solid var(--separator); border-radius:12px; padding:10px;
+  overflow-y:auto; font-family:"SF Mono",Consolas,monospace;
+  font-size:0.78em; line-height:1.5;
+}
+.log-entry { padding:3px 6px; border-radius:6px; margin-bottom:2px; word-break:break-word; }
+.log-entry.info { color:#64d2ff; }
+.log-entry.success { color:var(--green); }
+.log-entry.error { color:var(--red); }
+.log-entry.warn { color:var(--yellow); }
+.list { max-height:200px; overflow-y:auto; }
+.list-item {
+  background:rgba(120,120,128,0.16); padding:12px; border-radius:12px;
+  margin-bottom:6px; border:0.5px solid var(--separator);
+  display:flex; justify-content:space-between; align-items:center; font-size:0.9em;
+}
+.list-item .del { background:transparent; border:none; color:var(--red); cursor:pointer; font-size:1.2em; padding:4px 8px; }
+.empty { color:var(--dim); text-align:center; padding:20px; font-style:italic; }
+.info-panel {
+  position:fixed; top:20px; right:20px;
+  width:320px; max-width:calc(100vw - 40px);
+  background:var(--glass); backdrop-filter:blur(40px) saturate(180%);
+  border:0.5px solid var(--separator); border-radius:20px; padding:16px;
+  z-index:50; max-height:calc(100vh - 40px); overflow-y:auto;
+  transition:transform 0.4s cubic-bezier(0.32,0.72,0,1),opacity 0.3s;
+}
+.info-panel.hidden { transform:translateX(120%); opacity:0; }
+.info-title { font-weight:600; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.panel-toggle {
+  position:fixed; top:20px; right:20px; width:44px; height:44px; border-radius:50%;
+  background:var(--glass); backdrop-filter:blur(20px);
+  border:0.5px solid var(--separator); color:var(--text); font-size:1.2em;
+  cursor:pointer; z-index:60; display:flex; align-items:center; justify-content:center;
+}
+.panel-toggle:active { transform:scale(0.9); }
+.mobile-menu {
+  display:none; position:fixed; top:20px; left:20px;
+  width:44px; height:44px; border-radius:50%;
+  background:var(--glass); backdrop-filter:blur(20px);
+  border:0.5px solid var(--separator); color:var(--text); font-size:1.2em;
+  cursor:pointer; z-index:110; align-items:center; justify-content:center;
+}
+@media (max-width:768px) {
+  .sidebar { transform:translateX(-110%); width:100%; max-width:100vw; }
+  .sidebar.open { transform:translateX(0); }
+  .mobile-menu { display:flex; }
+  .info-panel { display:none; }
+  .panel-toggle { display:none; }
+}
+.sep { height:0.5px; background:var(--separator); margin:14px 0; }
+</style>
+</head>
+<body>
+<canvas id="starry-sky"></canvas>
+<button class="mobile-menu" onclick="toggleSidebar()">☰</button>
+<button class="panel-toggle" onclick="toggleInfoPanel()">📊</button>
+
+<div class="info-panel" id="infoPanel">
+  <div class="info-title"><span>📊</span> Статистика</div>
+  <div class="stats-grid">
+    <div class="stat-card"><span class="stat-label">Узлов</span><span class="stat-value blue" id="statNodes">0</span></div>
+    <div class="stat-card"><span class="stat-label">Закреплений</span><span class="stat-value my" id="statInfected">0</span></div>
+    <div class="stat-card"><span class="stat-label">Отправлено</span><span class="stat-value" id="statSent">0</span></div>
+    <div class="stat-card"><span class="stat-label">Доставлено</span><span class="stat-value ok" id="statDelivered">0</span></div>
+    <div class="stat-card"><span class="stat-label">Потеряно</span><span class="stat-value err" id="statFailed">0</span></div>
+    <div class="stat-card"><span class="stat-label">Время работы</span><span class="stat-value yellow" id="statUptime">0с</span></div>
+  </div>
+</div>
+
+<div class="sidebar" id="sidebar">
+  <div class="app-header">
+    <div class="app-title">InevioNet</div>
+    <div class="app-subtitle">Живая сеть • {{ version }}</div>
+    <div class="status-bar">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Подключение...</span>
+    </div>
+  </div>
+
+  <div id="authScreen" class="auth-screen" style="display:none">
+    <div class="auth-card">
+      <div style="font-size:2.5em;text-align:center">🌐</div>
+      <h2 style="text-align:center;margin:12px 0 20px;font-size:1.4em">Вход в сеть</h2>
+      <div class="auth-tabs">
+        <button class="tab-btn active" data-tab="login">Вход</button>
+        <button class="tab-btn" data-tab="register">Регистрация</button>
+      </div>
+      <div id="loginForm">
+        <div class="form-group"><label>Имя пользователя</label><input id="loginUsername" placeholder="Введите имя"></div>
+        <div class="form-group"><label>Пароль</label><input type="password" id="loginPassword" placeholder="Введите пароль"></div>
+        <button class="btn btn-primary" onclick="doLogin()">🔓 Войти</button>
+      </div>
+      <div id="registerForm" style="display:none">
+        <div class="form-group"><label>Имя пользователя</label><input id="regUsername" placeholder="Придумайте имя"></div>
+        <div class="form-group"><label>Пароль</label><input type="password" id="regPassword" placeholder="Придумайте пароль"></div>
+        <div class="form-group"><label>Повторите пароль</label><input type="password" id="regPassword2" placeholder="Ещё раз"></div>
+        <button class="btn btn-success" onclick="doRegister()">✨ Создать аккаунт</button>
+      </div>
+      <div id="authError" style="color:var(--red);text-align:center;font-size:0.85em;margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div id="mainInterface" style="display:none">
+    <div class="user-bar">
+      <div>
+        <div id="currentUsername" style="font-size:1.05em">-</div>
+        <div class="user-node" id="currentUserNode"></div>
+      </div>
+      <button class="btn btn-sm btn-glass" onclick="doLogout()">Выйти</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">💬</span> Отправить сообщение</div>
+      <div class="form-group"><label>Кому (имя или ID)</label><input id="receiver" placeholder="Введите получателя"></div>
+      <div class="form-group"><label>Сообщение</label><textarea id="message" rows="3" placeholder="Введите текст..."></textarea></div>
+      <button class="btn btn-primary" onclick="sendMessage()">📤 Отправить</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">🛡️</span> Анонимность</div>
+      <button class="btn btn-glass" onclick="checkTor()">🧅 Проверить Tor</button>
+      <button class="btn btn-glass" onclick="checkI2P()">🌐 Проверить I2P</button>
+      <div id="anonResult" style="margin-top:10px;font-size:0.85em;color:var(--dim)"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">📡</span> Сканирование сетей</div>
+      <button class="btn btn-glass" onclick="scanWiFi()">📶 Wi-Fi сети</button>
+      <button class="btn btn-glass" onclick="scanBLE()">📱 Bluetooth (BLE)</button>
+      <button class="btn btn-glass" onclick="scanLTE()">📡 Сотовые сети</button>
+      <div id="scanResult" style="margin-top:10px;font-size:0.85em;color:var(--dim)"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">🌉</span> P2P Мост</div>
+      <div style="font-size:0.85em;color:var(--dim);margin-bottom:10px">Помоги другим подключиться. Стань реле-узлом!</div>
+      <div class="form-group"><label>Регион</label><input id="bridgeRegion" value="RU"></div>
+      <div class="form-group"><label>Лимит клиентов</label><input id="bridgeCapacity" value="10" type="number"></div>
+      <button class="btn btn-glass" onclick="checkBridge()">📊 Статус</button>
+      <button class="btn btn-success" onclick="becomeVolunteer()">✅ Стать реле-узлом</button>
+      <button class="btn btn-danger" onclick="stopVolunteer()">⛔ Остановить</button>
+      <div id="bridgeResult" style="margin-top:10px;font-size:0.85em;color:var(--dim)"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">🏭</span> Промышленные протоколы</div>
+      <div class="form-group"><label>Адрес устройства</label><input id="industrialTarget" placeholder="192.168.1.1:502"></div>
+      <button class="btn btn-glass" onclick="scanIndustrial()">🔍 Найти устройства</button>
+      <div id="industrialResults" style="margin-top:10px;font-size:0.85em;color:var(--dim)"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">📱</span> Мой QR-код</div>
+      <div style="text-align:center;margin-bottom:12px">
+        <img id="qrImage" src="" style="display:none;max-width:200px;border-radius:12px">
+        <div id="qrPlaceholder" style="color:var(--dim);font-size:0.9em;padding:20px">Нажмите кнопку</div>
+      </div>
+      <button class="btn btn-glass" onclick="generateQR()">🎨 Показать QR</button>
+      <button class="btn btn-sm btn-glass" onclick="copyNodeId()">📋 Скопировать ID</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">👥</span> Контакты (<span id="contactsCount" style="color:var(--blue)">0</span>)</div>
+      <div id="contactsList" class="list"><div class="empty">Нет контактов</div></div>
+      <div class="form-group" style="margin-top:12px"><label>Добавить контакт (JSON из QR)</label><textarea id="qrImportData" rows="2" placeholder="Вставьте данные"></textarea></div>
+      <button class="btn btn-glass" onclick="addContactFromQR()">➕ Добавить</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">📥</span> Входящие сообщения</div>
+      <div id="inboxList" class="list" style="max-height:240px"><div class="empty">Пока пусто</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="emoji">📋</span> Системный лог</div>
+      <div class="log-container" id="logContainer"></div>
+      <button class="btn btn-sm btn-glass" style="margin-top:8px" onclick="clearLogs()">🗑️ Очистить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+let currentUser = null;
+let nodes = {}, stars = [];
+let zoom = 1, panX = 0, panY = 0;
+let dragging = false, dsx = 0, dsy = 0;
+
+const canvas = document.getElementById('starry-sky');
+const ctx = canvas.getContext('2d');
+const COLORS = { self:'#30d158', wifi:'#0a84ff', bluetooth:'#64d2ff', peer:'#bf5af2', spore:'#ff375f', ble:'#5ac8fa', cellular:'#ffd60a', industrial:'#ff9f0a', super:'#ffffff' };
+const RANK = { self:0, wifi:1, super:2, spore:3, ble:4, bluetooth:5, cellular:6, industrial:7, peer:8 };
+
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+function toggleInfoPanel() { document.getElementById('infoPanel').classList.toggle('hidden'); }
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  if (!panX && !panY) { panX = canvas.width / 2; panY = canvas.height / 2; }
+}
+resize();
+window.addEventListener('resize', resize);
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const d = e.deltaY > 0 ? 0.9 : 1.1;
+  const nz = Math.max(0.2, Math.min(5, zoom * d));
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+  zoom = nz;
+  panX = mx - wx * zoom;
+  panY = my - wy * zoom;
+}, { passive:false });
+
+canvas.addEventListener('mousedown', e => { dragging = true; dsx = e.clientX - panX; dsy = e.clientY - panY; });
+canvas.addEventListener('mousemove', e => { if (dragging) { panX = e.clientX - dsx; panY = e.clientY - dsy; } });
+canvas.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mouseleave', () => dragging = false);
+canvas.addEventListener('dblclick', () => { zoom = 1; panX = canvas.width / 2; panY = canvas.height / 2; });
+
+function hash(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) { h = ((h << 5) - h) + id.charCodeAt(i); h = h & h; }
+  return Math.abs(h);
+}
+
+function layout(nd, pm) {
+  const h = hash(nd.node_id);
+  const a = (h % 360) * Math.PI / 180;
+  if (nd.type === 'self') return { x:0, y:0 };
+  if (nd.type === 'wifi') { const r = 170 + (100 - (nd.signal || 50)) * 2.2; return { x:Math.cos(a)*r, y:Math.sin(a)*r }; }
+  if (nd.type === 'spore') { const p = pm[nd.parent] || { x:0, y:0 }; const r2 = 45 + (h % 25); return { x:p.x + Math.cos(a)*r2, y:p.y + Math.sin(a)*r2 }; }
+  if (nd.type === 'bluetooth' || nd.type === 'ble') { const r3 = 100 + (h % 40); return { x:Math.cos(a)*r3, y:Math.sin(a)*r3 }; }
+  if (nd.type === 'cellular') { const r5 = 220 + (h % 50); return { x:Math.cos(a)*r5, y:Math.sin(a)*r5 }; }
+  const r4 = 260 + (h % 60);
+  return { x:Math.cos(a)*r4, y:Math.sin(a)*r4 };
+}
+
+function animate() {
+  ctx.fillStyle = 'rgba(0,4,40,0.15)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (Math.random() < 0.06) {
+    ctx.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.5) + ')';
+    ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1.5, 1.5);
+  }
+  ctx.save();
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+  ctx.lineWidth = 1 / zoom;
+  const pm = {};
+  stars.forEach(s => pm[s.node.node_id] = s);
+  stars.forEach(s => {
+    const p = s.node.parent && pm[s.node.parent];
+    if (p) {
+      const col = s.node.type === 'spore' ? 'rgba(255,55,95,0.4)' : 'rgba(10,132,255,0.25)';
+      ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(s.x, s.y); ctx.stroke();
+    }
+  });
+  stars.forEach(s => {
+    s.pulse += 0.04;
+    const r = s.base * (1 + Math.sin(s.pulse) * 0.22);
+    const col = s.node.evolving ? '#ffd60a' : (COLORS[s.node.type] || '#8888aa');
+    const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 5);
+    g.addColorStop(0, col + '80');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(s.x, s.y, r * 5, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+    if (s.node.type === 'self') { ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); }
+    ctx.font = (11 / zoom) + 'px -apple-system,sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(s.node.label || s.node.name || s.node.node_id, s.x + r + 6 / zoom, s.y + 3 / zoom);
+  });
+  ctx.restore();
+  requestAnimationFrame(animate);
+}
+animate();
+
+function addLog(msg, type) {
+  const c = document.getElementById('logContainer');
+  const e = document.createElement('div');
+  e.className = 'log-entry ' + (type || 'info');
+  e.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  c.appendChild(e);
+  while (c.children.length > 200) c.removeChild(c.firstChild);
+  c.scrollTop = c.scrollHeight;
+}
+function clearLogs() { document.getElementById('logContainer').innerHTML = ''; }
+
+socket.on('connect', () => {
+  document.getElementById('statusDot').classList.add('on');
+  document.getElementById('statusText').textContent = 'Подключено';
+  addLog('Соединение установлено', 'success');
+  socket.emit('request_stats');
+});
+socket.on('disconnect', () => {
+  document.getElementById('statusDot').classList.remove('on');
+  document.getElementById('statusText').textContent = 'Отключено';
+  addLog('Соединение потеряно', 'error');
+});
+socket.on('server_log', d => { addLog(d.msg, d.level === 'ERROR' ? 'error' : (d.level === 'WARNING' ? 'warn' : 'info')); });
+socket.on('inbox_new', m => { addLog('Новое сообщение от ' + (m.sender || '?'), 'success'); loadInbox(); });
+socket.on('nodes_update', d => {
+  nodes = d.nodes || {};
+  const pm = {};
+  const order = Object.values(nodes).sort((a, b) => (RANK[a.type] || 9) - (RANK[b.type] || 9));
+  order.forEach(nd => { pm[nd.node_id] = layout(nd, pm); });
+  stars = order.map(nd => {
+    const old = stars.find(s => s.node.node_id === nd.node_id);
+    const p = pm[nd.node_id];
+    return { node: nd, x:p.x, y:p.y, base:(nd.type === 'self' ? 7 : 3 + (nd.trust || 50) / 25), pulse: old ? old.pulse : Math.random() * 6 };
+  });
+  document.getElementById('statNodes').textContent = Object.keys(nodes).length;
+  document.getElementById('statInfected').textContent = d.infected || 0;
+});
+socket.on('stats_update', st => {
+  document.getElementById('statSent').textContent = st.packets_sent || 0;
+  document.getElementById('statDelivered').textContent = st.packets_delivered || 0;
+  document.getElementById('statFailed').textContent = st.packets_failed || 0;
+  const u = st.uptime || 0;
+  document.getElementById('statUptime').textContent = Math.floor(u / 60) + 'м ' + Math.floor(u % 60) + 'с';
+});
+
+document.querySelectorAll('.tab-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    const t = b.dataset.tab;
+    document.getElementById('loginForm').style.display = t === 'login' ? 'block' : 'none';
+    document.getElementById('registerForm').style.display = t === 'register' ? 'block' : 'none';
+  });
+});
+
+function showAuth() { document.getElementById('authScreen').style.display = 'flex'; document.getElementById('mainInterface').style.display = 'none'; }
+function showMain() {
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('mainInterface').style.display = 'block';
+  document.getElementById('currentUsername').textContent = currentUser.username;
+  document.getElementById('currentUserNode').textContent = currentUser.node_id || '';
+  loadContacts(); loadInbox();
+}
+function checkAuth() {
+  fetch('/api/me').then(r => r.json()).then(d => { if (d.success) { currentUser = d.user; showMain(); } else showAuth(); }).catch(showAuth);
+}
+function doLogin() {
+  const u = document.getElementById('loginUsername').value.trim();
+  const p = document.getElementById('loginPassword').value;
+  fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p}) })
+  .then(r => r.json()).then(d => {
+    if (d.success) { currentUser = d.user; showMain(); addLog('Добро пожаловать, ' + u, 'success'); }
+    else { document.getElementById('authError').textContent = d.error; }
+  });
+}
+function doRegister() {
+  const u = document.getElementById('regUsername').value.trim();
+  const p = document.getElementById('regPassword').value;
+  const p2 = document.getElementById('regPassword2').value;
+  if (p !== p2) { document.getElementById('authError').textContent = 'Пароли не совпадают'; return; }
+  fetch('/api/register', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p}) })
+  .then(r => r.json()).then(d => {
+    if (d.success) { currentUser = d.user; showMain(); addLog('Аккаунт создан: ' + u, 'success'); }
+    else { document.getElementById('authError').textContent = d.error; }
+  });
+}
+function doLogout() { fetch('/api/logout', { method:'POST' }).then(() => { currentUser = null; showAuth(); }); }
+
+function sendMessage() {
+  const r = document.getElementById('receiver').value;
+  const m = document.getElementById('message').value;
+  if (!r || !m) { addLog('Заполните все поля', 'error'); return; }
+  fetch('/api/p2/send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({receiver:r, message:m}) })
+  .then(r2 => r2.json()).then(d => {
+    addLog(d.success ? '✅ Отправлено' : '❌ Ошибка: ' + (d.error || ''), d.success ? 'success' : 'error');
+    if (d.success) document.getElementById('message').value = '';
+  });
+}
+function loadInbox() {
+  fetch('/api/p2/inbox').then(r => r.json()).then(d => {
+    const el = document.getElementById('inboxList');
+    if (!el) return;
+    if (!d.messages || !d.messages.length) { el.innerHTML = '<div class="empty">Пока пусто</div>'; return; }
+    el.innerHTML = d.messages.slice().reverse().map(m => '<div class="list-item"><div><b>' + (m.sender || '?') + '</b><br><span style="color:var(--dim);font-size:0.85em">' + (m.message || '') + '</span></div><span style="color:var(--dim);font-size:0.7em">' + new Date(m.ts * 1000).toLocaleTimeString() + '</span></div>').join('');
+  }).catch(() => {});
+}
+
+function checkTor() {
+  addLog('Проверка Tor...', 'info');
+  fetch('/api/tor/status').then(r => r.json()).then(d => {
+    const el = document.getElementById('anonResult');
+    if (d.available) { el.textContent = '🧅 Tor: Доступен'; addLog('Tor работает', 'success'); }
+    else { el.textContent = '🧅 Tor: Не запущен'; addLog('Tor не найден', 'warn'); }
+  });
+}
+function checkI2P() {
+  addLog('Проверка I2P...', 'info');
+  fetch('/api/i2p/status').then(r => r.json()).then(d => {
+    const el = document.getElementById('anonResult');
+    if (d.available) { el.textContent = '🌐 I2P: Доступен'; addLog('I2P работает', 'success'); }
+    else { el.textContent = '🌐 I2P: Не запущен'; addLog('I2P не найден', 'warn'); }
+  });
+}
+
+function scanWiFi() {
+  addLog('Поиск Wi-Fi сетей...', 'info');
+  document.getElementById('scanResult').textContent = 'Сканирование Wi-Fi...';
+  fetch('/api/rf/scan', { method:'POST' }).then(r => r.json()).then(d => {
+    document.getElementById('scanResult').textContent = '📶 Wi-Fi: ' + (d.wifi || 0) + ' | 📱 BT: ' + (d.bt || 0);
+    addLog('Wi-Fi найдено: ' + (d.wifi || 0), 'success');
+  });
+}
+function scanBLE() {
+  addLog('Поиск Bluetooth устройств (5 сек)...', 'info');
+  document.getElementById('scanResult').textContent = 'Сканирование Bluetooth...';
+  fetch('/api/ble/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({duration:5}) }).then(r => r.json()).then(d => {
+    document.getElementById('scanResult').textContent = '📱 Найдено Bluetooth: ' + (d.count || 0);
+    addLog('Bluetooth: ' + (d.count || 0) + ' устройств', 'success');
+  });
+}
+function scanLTE() {
+  addLog('Поиск сотовых сетей...', 'info');
+  document.getElementById('scanResult').textContent = 'Сканирование сотовых...';
+  fetch('/api/cellular/scan', { method:'POST' }).then(r => r.json()).then(d => {
+    const modem = (d.modem || []).length;
+    const wifi = (d.via_wifi || []).length;
+    document.getElementById('scanResult').textContent = '📡 Модем: ' + modem + ' | Через Wi-Fi: ' + wifi;
+    addLog('Сотовые: ' + (modem + wifi), 'success');
+  });
+}
+
+function checkBridge() {
+  addLog('Проверка P2P моста...', 'info');
+  fetch('/api/bridge/status').then(r => r.json()).then(d => {
+    const b = d.broker || {};
+    document.getElementById('bridgeResult').textContent = 'Реле-узлов: ' + (b.total_relays || 0) + ' | Доступно: ' + (b.available_relays || 0);
+    addLog('P2P мост: ' + (b.total_relays || 0) + ' реле-узлов', 'success');
+  });
+}
+function becomeVolunteer() {
+  const region = document.getElementById('bridgeRegion').value || 'unknown';
+  const capacity = parseInt(document.getElementById('bridgeCapacity').value) || 10;
+  addLog('Регистрация реле-узла...', 'info');
+  fetch('/api/bridge/volunteer', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({region, capacity}) }).then(r => r.json()).then(d => {
+    if (d.success) { document.getElementById('bridgeResult').textContent = '✅ Вы реле-узел! Лимит: ' + (d.relay.capacity || 0); addLog('Реле-узел запущен', 'success'); }
+    else { document.getElementById('bridgeResult').textContent = '❌ Ошибка'; }
+  });
+}
+function stopVolunteer() {
+  addLog('Остановка реле-узла...', 'info');
+  fetch('/api/bridge/stop', { method:'POST' }).then(r => r.json()).then(d => {
+    if (d.success) { document.getElementById('bridgeResult').textContent = 'Остановлен'; addLog('Реле-узел остановлен', 'success'); }
+  });
+}
+
+function scanIndustrial() {
+  const target = document.getElementById('industrialTarget').value.trim();
+  if (!target) { addLog('Введите адрес', 'error'); return; }
+  addLog('Поиск промышленных устройств: ' + target, 'info');
+  document.getElementById('industrialResults').textContent = 'Сканирование...';
+  fetch('/api/industrial/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target}) }).then(r => r.json()).then(d => {
+    if (d.success) {
+      let out = [];
+      for (const [proto, res] of Object.entries(d.results || {})) {
+        out.push(proto + ': ' + (res.found ? '✅ найдено' : 'не найдено'));
+      }
+      document.getElementById('industrialResults').textContent = out.join(' | ');
+      addLog('Промышленный скан завершён', 'success');
+    }
+  });
+}
+
+function generateQR() {
+  fetch('/api/qr').then(r => r.json()).then(d => {
+    if (d.success) {
+      const img = document.getElementById('qrImage');
+      img.src = d.qr_url + '?t=' + Date.now();
+      img.style.display = 'block';
+      document.getElementById('qrPlaceholder').style.display = 'none';
+      addLog('QR-код готов', 'success');
+    }
+  });
+}
+function copyNodeId() {
+  if (currentUser && navigator.clipboard) {
+    navigator.clipboard.writeText(currentUser.node_id || '');
+    addLog('ID скопирован', 'success');
+  }
+}
+
+function addContactFromQR() {
+  const raw = document.getElementById('qrImportData').value.trim();
+  if (!raw) return;
+  try {
+    const q = JSON.parse(raw);
+    fetch('/api/contacts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({qr_data:q}) }).then(r => r.json()).then(d => {
+      addLog(d.added ? '✅ Контакт добавлен' : 'Уже есть', d.added ? 'success' : 'warn');
+      loadContacts();
+    });
+  } catch (e) { addLog('Неверный формат', 'error'); }
+}
+function removeContact(id) { fetch('/api/contacts/' + id, { method:'DELETE' }).then(() => loadContacts()); }
+function loadContacts() {
+  fetch('/api/contacts').then(r => r.json()).then(d => {
+    const cs = d.contacts || [];
+    document.getElementById('contactsCount').textContent = cs.length;
+    document.getElementById('contactsList').innerHTML = cs.length
+      ? cs.map(c => '<div class="list-item"><span>' + (c.username || '?') + ' <span style="color:var(--dim);font-size:0.8em">' + (c.node_id || '') + '</span></span><button class="del" onclick="removeContact(\'' + c.node_id + '\')">x</button></div>').join('')
+      : '<div class="empty">Нет контактов</div>';
+  });
+}
+
+checkAuth();
+setInterval(loadInbox, 10000);
+addLog('InevioNet загружен', 'info');
+</script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+--- [121/293] inevionet\evolution\engine.py  (11.54 KB) ---
+
+"""InevioNet Evolution Engine - генетический алгоритм."""
+import random
+import time
+from typing import List, Dict, Any, Optional
+
+from .genome import ProtocolGenome, create_random_genome, create_from_protocol
+from ..core.logger import get_logger
+
+logger = get_logger("inevionet.evolution.engine")
+
+
+class EvolutionEngine:
+    """Эволюционный движок с генетическим алгоритмом."""
+
+    def __init__(self, population_size=50, mutation_rate=0.01,
+                 crossover_rate=0.3, elite_size=5, tournament_size=3,
+                 max_generations=100):
+        self.population_size = population_size
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.elite_size = elite_size
+        self.tournament_size = tournament_size
+        self.max_generations = max_generations
+        self.population: List[ProtocolGenome] = []
+        self.generation = 0
+        self.best_genome: Optional[ProtocolGenome] = None
+        self.history: List[Dict[str, float]] = []
+        self.fitness_weights: Optional[Dict[str, float]] = None
+        # P26: auto-deploy callback
+        self._on_auto_deploy = None
+        self._auto_deploy_triggered = False
+
+    def initialize(self, protocols: Optional[List[str]] = None):
+        """Инициализировать популяцию."""
+        self.population = []
+        protocols = protocols or ["TCP", "UDP", "HTTPS", "DNS", "WebSocket"]
+        for proto in protocols:
+            g = create_from_protocol(proto)
+            g.mutation_rate = self.mutation_rate
+            g.calculate_fitness(self.fitness_weights)
+            self.population.append(g)
+        while len(self.population) < self.population_size:
+            g = create_random_genome()
+            g.mutation_rate = self.mutation_rate
+            g.calculate_fitness(self.fitness_weights)
+            self.population.append(g)
+        self.population = self.population[:self.population_size]
+        self._update_best()
+        self.generation = 0
+        logger.info(f"Population initialized: {len(self.population)} genomes")
+        return self
+
+    def set_fitness_weights(self, weights: Dict[str, float]):
+        self.fitness_weights = weights
+        for g in self.population:
+            g.calculate_fitness(weights)
+
+    def evolve(self) -> ProtocolGenome:
+        """Одно поколение эволюции."""
+        self.generation += 1
+        for g in self.population:
+            g.calculate_fitness(self.fitness_weights)
+        self.population.sort(key=lambda g: g.fitness, reverse=True)
+        new_population = []
+        for i in range(min(self.elite_size, len(self.population))):
+            new_population.append(self.population[i].copy())
+        while len(new_population) < self.population_size:
+            parent1 = self._tournament_select()
+            parent2 = self._tournament_select()
+            if random.random() < self.crossover_rate:
+                child = parent1.crossover(parent2)
+            else:
+                child = parent1.copy()
+                child.parent_ids = [parent1.genome_id]
+                child.generation = parent1.generation + 1
+                child.genome_id = f"gen_{random.randint(100000, 999999)}"
+            if random.random() < self.mutation_rate * 10:
+                child.mutate()
+            child.calculate_fitness(self.fitness_weights)
+            new_population.append(child)
+        self.population = new_population[:self.population_size]
+        self._update_best()
+
+        if self.generation > 0 and self.generation % 50 == 0:
+            self._catastrophe()
+
+        self.history.append({
+            "generation": self.generation,
+            "best_fitness": self.best_genome.fitness if self.best_genome else 0,
+            "avg_fitness": self._average_fitness(),
+            "diversity": self._diversity(),
+        })
+
+        # P26: auto-deploy trigger
+        if (self.best_genome and self.best_genome.fitness >= 0.9
+                and not getattr(self, "_auto_deploy_triggered", False)):
+            self._auto_deploy_triggered = True
+            logger.info("[Evolution] AUTO-DEPLOY: fitness=%.3f >= 0.9",
+                        self.best_genome.fitness)
+            if hasattr(self, "_on_auto_deploy") and self._on_auto_deploy:
+                try:
+                    self._on_auto_deploy()
+                except Exception as e:
+                    logger.error("[Evolution] auto-deploy callback error: %s", e)
+
+        # Reset trigger if fitness dropped
+        if (self.best_genome and self.best_genome.fitness < 0.85):
+            self._auto_deploy_triggered = False
+
+        return self.best_genome
+
+    def evolve_multiple(self, n=10) -> ProtocolGenome:
+        for _ in range(n):
+            self.evolve()
+        return self.best_genome
+
+    def _tournament_select(self) -> ProtocolGenome:
+        tournament = random.sample(self.population,
+                                   min(self.tournament_size, len(self.population)))
+        return max(tournament, key=lambda g: g.fitness)
+
+    def _roulette_select(self) -> ProtocolGenome:
+        total = sum(g.fitness for g in self.population)
+        if total == 0:
+            return random.choice(self.population)
+        pick = random.uniform(0, total)
+        current = 0
+        for g in self.population:
+            current += g.fitness
+            if current >= pick:
+                return g
+        return self.population[-1]
+
+    def _catastrophe(self):
+        """P13: Р РЋР Т‘Р Р†Р С‘Р С– fitness landscape + Р С‘Р Р…Р В¶Р ВµР С”РЎвЂ Р С‘РЎРЏ РЎРѓР В»РЎС“РЎвЂЎР В°Р в„–Р Р…РЎвЂ№РЎвЂ¦ Р С–Р ВµР Р…Р С•Р Р†."""
+        logger.info("[Evolution] CATASTROPHE at generation %d", self.generation)
+        keep = max(1, int(len(self.population) * 0.7))
+        self.population = sorted(
+            self.population, key=lambda g: g.fitness, reverse=True
+        )[:keep]
+        while len(self.population) < self.population_size:
+            g = create_random_genome()
+            g.mutation_rate = self.mutation_rate
+            g.calculate_fitness(self.fitness_weights)
+            self.population.append(g)
+        logger.info("[Evolution] after catastrophe: pop=%d, diversity=%.3f",
+                    len(self.population), self._diversity())
+
+    def reward(self, strategy_type, strategy_value, success, delta=0.1):
+        """P13: Р СњР В°Р С–РЎР‚Р В°Р Т‘Р В° Р С–Р ВµР Р…Р С•Р СР В°Р С Р С—Р С• РЎР‚Р ВµР В·РЎС“Р В»РЎРЉРЎвЂљР В°РЎвЂљР В°Р С."""
+        if not self.population:
+            return 0
+        attr_map = {
+            "penetration": "penetration_strategy",
+            "masking": "masking_channel",
+            "stego": "stego_method",
+            "industrial": "industrial_protocol",
+            "protocol": "protocol_name",
+        }
+        attr = attr_map.get(strategy_type)
+        if not attr:
+            return 0
+        reward = delta if success else -delta * 0.5
+        matched = 0
+        for genome in self.population:
+            if getattr(genome, attr, None) == strategy_value:
+                genome.fitness = max(0.0, min(1.0, genome.fitness + reward))
+                matched += 1
+        return matched
+
+    def best_strategy(self, strategy_type):
+        """P13: Р вЂєРЎС“РЎвЂЎРЎв‚¬Р В°РЎРЏ РЎРѓРЎвЂљРЎР‚Р В°РЎвЂљР ВµР С–Р С‘РЎРЏ Р С—Р С• РЎвЂљР С‘Р С—РЎС“."""
+        if not self.population:
+            return None
+        attr_map = {
+            "penetration": "penetration_strategy",
+            "masking": "masking_channel",
+            "stego": "stego_method",
+            "industrial": "industrial_protocol",
+            "protocol": "protocol_name",
+        }
+        attr = attr_map.get(strategy_type)
+        if not attr:
+            return None
+        top = sorted(self.population, key=lambda g: g.fitness, reverse=True)[:10]
+        votes = {}
+        for g in top:
+            v = getattr(g, attr, None)
+            if v:
+                votes[v] = votes.get(v, 0.0) + g.fitness
+        if not votes:
+            return None
+        return max(votes, key=votes.get)
+
+    def _update_best(self):
+        if not self.population:
+            self.best_genome = None
+            return
+        best = max(self.population, key=lambda g: g.fitness)
+        if self.best_genome is None or best.fitness > self.best_genome.fitness:
+            self.best_genome = best.copy()
+
+    def _average_fitness(self) -> float:
+        if not self.population:
+            return 0.0
+        return sum(g.fitness for g in self.population) / len(self.population)
+
+    def _diversity(self) -> float:
+        if len(self.population) < 2:
+            return 0.0
+        import statistics
+        genes = ["speed", "reliability", "stealth", "efficiency", "adaptability"]
+        total_std = 0.0
+        for gene in genes:
+            values = [getattr(g, gene) for g in self.population]
+            if len(values) > 1:
+                try:
+                    total_std += statistics.stdev(values)
+                except Exception:
+                    pass
+        return min(1.0, total_std / len(genes))
+
+    def get_best_genome(self):
+        return self.best_genome
+
+    def get_top_genomes(self, n=5):
+        return sorted(self.population, key=lambda g: g.fitness, reverse=True)[:n]
+
+    def get_stats(self):
+        return {
+            "generation": self.generation,
+            "population_size": len(self.population),
+            "best_fitness": self.best_genome.fitness if self.best_genome else 0,
+            "avg_fitness": self._average_fitness(),
+            "diversity": self._diversity(),
+            "history_size": len(self.history),
+        }
+
+    def save_population(self):
+        return [g.to_dict() for g in self.population]
+
+    def load_population(self, data):
+        self.population = [ProtocolGenome.from_dict(d) for d in data]
+        self._update_best()
+
+    def genome_to_protocol_params(self, genome):
+        return {
+            "packet_size": genome.packet_size,
+            "ttl": genome.ttl,
+            "priority": genome.priority,
+            "clone_threshold": genome.clone_threshold,
+            "timeout": 5.0 + (1.0 - genome.speed) * 10.0,
+            "retries": int(1 + genome.reliability * 9),
+        }
+
+    def __repr__(self):
+        return (f"EvolutionEngine(gen={self.generation}, "
+                f"pop={len(self.population)}, "
+                f"best={self.best_genome.fitness:.3f})" if self.best_genome else "EvolutionEngine(empty)")
+
+
+if __name__ == "__main__":
+    print("Testing EvolutionEngine...")
+    engine = EvolutionEngine(population_size=20, mutation_rate=0.05, crossover_rate=0.5)
+    engine.initialize()
+    print(f"Initial: {engine}")
+    for i in range(10):
+        engine.evolve()
+    stats = engine.get_stats()
+    print(f"After 10 generations:")
+    print(f"  Best fitness: {stats['best_fitness']:.3f}")
+    print(f"  Avg fitness: {stats['avg_fitness']:.3f}")
+    print(f"  Diversity: {stats['diversity']:.3f}")
+    best = engine.get_best_genome()
+    print(f"Best genome: {best}")
+    params = engine.genome_to_protocol_params(best)
+    print(f"Protocol params: {params}")
+    print("EvolutionEngine module OK")
+
+
+

@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+venv/
+.venv/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# DATA & SECRETS
+data/*
+!data/.gitkeep
+*.key
+*.pem
+*.db
+secrets.env
+.env
+
+# LOGS
+logs/
+*.log
+
+# BACKUPS
+*.bak*
+_backup_*/
+_archive_broken/
+_transfer/
+installer_output/
+patch*.py
+fix_*.py
+
+# IDE
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

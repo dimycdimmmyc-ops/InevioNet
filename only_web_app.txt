@@ -1,0 +1,43 @@
+] web\app.py  (67.12 KB) ---
+
+"""
+InevioNet Web Dashboard — CLEAN BUILD.
+Живая сеть: грибница + ДНК + mesh + мессенджер.
+Без SuperNode, без DHT, без seed, без hole_punch, без acks.
+"""
+import os
+import sys
+import time
+import json
+import subprocess
+import threading
+import re
+import random
+import socket
+import struct
+import logging
+
+# === UTF-8 для Windows ===
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
+import urllib.request as _urlreq
+import ssl as _ssl
+
+from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask_socketio import SocketIO, emit
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from inevionet import InevioNet, __version__
+from inevionet.users import get_user_manager
+
+# ================================================================
+# FLASK + SOCKETIO
+# ================================================================
+app = Flask(__name__, static_folder='static', template_folder='templates')
+app.config['SECRET_KEY'
