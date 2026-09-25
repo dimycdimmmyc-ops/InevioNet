@@ -18,6 +18,7 @@ SEED_TAG = "inevionet_v1"
 
 @dataclass
 class Seed:
+    # P103: serial + dead_drop_url + relay_count
     node_id: str = ""
     public_ip: str = ""
     public_port: int = 0

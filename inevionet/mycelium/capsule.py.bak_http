@@ -1,0 +1,396 @@
+"""InevioNet Mycelium Capsule - build & deploy capsule to trusted hosts."""
+import os
+import sys
+import json
+import time
+import socket
+import hashlib
+import subprocess
+import threading
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass, field, asdict
+
+from ..core.logger import get_logger
+from ..core.constants import DataPaths
+
+logger = get_logger("inevionet.mycelium.capsule")
+
+
+# ============================================================
+# TrustedHosts
+# ============================================================
+class TrustedHosts:
+    """Список доверенных устройств (только свои!)."""
+
+    def __init__(self, path: Optional[str] = None):
+        if path is None:
+            try:
+                path = str(DataPaths.get_state_dir() / "trusted_hosts.json")
+            except Exception:
+                path = "trusted_hosts.json"
+        self.path = path
+        self.hosts: List[Dict[str, Any]] = []
+        self._lock = threading.Lock()
+        self._load()
+
+    def add(self, host: str, label: str = "", user: str = None,
+            method: str = "auto") -> bool:
+        with self._lock:
+            for h in self.hosts:
+                if h["host"] == host:
+                    h["label"] = label or h.get("label", "")
+                    h["user"] = user or h.get("user")
+                    h["method"] = method
+                    self._save()
+                    return True
+            self.hosts.append({
+                "host": host,
+                "label": label or host,
+                "user": user,
+                "method": method,
+                "added_at": time.time(),
+            })
+            self._save()
+            logger.info("[Trusted] added: %s (%s)", host, label)
+            return True
+
+    def remove(self, host: str) -> bool:
+        with self._lock:
+            before = len(self.hosts)
+            self.hosts = [h for h in self.hosts if h["host"] != host]
+            if len(self.hosts) < before:
+                self._save()
+                logger.info("[Trusted] removed: %s", host)
+                return True
+            return False
+
+    def is_trusted(self, host: str) -> bool:
+        with self._lock:
+            return any(h["host"] == host for h in self.hosts)
+
+    def get(self, host: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            for h in self.hosts:
+                if h["host"] == host:
+                    return dict(h)
+            return None
+
+    def list_all(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return [dict(h) for h in self.hosts]
+
+    def _load(self):
+        try:
+            if os.path.exists(self.path):
+                with open(self.path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.hosts = data if isinstance(data, list) else []
+                logger.info("[Trusted] loaded %d hosts", len(self.hosts))
+        except Exception as e:
+            logger.warning("[Trusted] load error: %s", e)
+            self.hosts = []
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(self.hosts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error("[Trusted] save error: %s", e)
+
+
+# ============================================================
+# CapsuleBuilder
+# ============================================================
+class CapsuleBuilder:
+    """Собирает минимальный capsule из своего кода."""
+
+    # Модули, которые включаются в capsule
+    INCLUDE_MODULES = [
+        "core",
+        "network",
+        "mycelium",
+        "evolution",
+        "steganography",
+        "masking",
+        "identity",
+    ]
+
+    # Модули, которые НЕ включаются
+    EXCLUDE_MODULES = [
+        "web",
+        "users",
+        "industrial",
+        "capsule",
+        "mesh",
+        "symbiotic",
+        "ai",
+        "dht",
+        "messaging",
+        "security",
+        "simple",
+    ]
+
+    def __init__(self, project_root: Optional[str] = None):
+        # __file__ = E:\InevioNet\inevionet\mycelium\capsule.py
+        # parent  = E:\InevioNet\inevionet\mycelium
+        # parent2 = E:\InevioNet\inevionet         ← это self.inev_dir
+        # parent3 = E:\InevioNet                     ← это project_root
+        if project_root is None:
+            capsule_file = os.path.abspath(__file__)
+            inev_dir = os.path.dirname(os.path.dirname(capsule_file))
+            project_root = os.path.dirname(inev_dir)
+        self.project_root = project_root
+        self.inev_dir = os.path.join(project_root, "inevionet")
+        print(f"[CapsuleBuilder] project_root={self.project_root}")
+        print(f"[CapsuleBuilder] inev_dir={self.inev_dir}")
+
+    def build_minimal(self, include: Optional[List[str]] = None) -> bytes:
+        """Собрать минимальный capsule (tar.gz в base64)."""
+        import io
+        import tarfile
+        import base64
+
+        include = include or self.INCLUDE_MODULES
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for module in include:
+                mod_path = os.path.join(self.inev_dir, module)
+                if not os.path.isdir(mod_path):
+                    continue
+                for dirpath, dirnames, filenames in os.walk(mod_path):
+                    dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+                    for fname in filenames:
+                        if not fname.endswith(".py"):
+                            continue
+                        full = os.path.join(dirpath, fname)
+                        # arcname = "inevionet/module/file.py"
+                        rel = os.path.relpath(full, self.project_root)
+                        tar.add(full, arcname=rel.replace("\\", "/"))
+                        print(f"[CapsuleBuilder] added: {rel}")
+
+            # Добавить метаданные
+            meta = {
+                "version": "1.0.0",
+                "built_at": time.time(),
+                "include": include,
+                "host": socket.gethostname(),
+            }
+            meta_bytes = json.dumps(meta, indent=2).encode("utf-8")
+            info = tarfile.TarInfo(name="capsule_meta.json")
+            info.size = len(meta_bytes)
+            info.mtime = int(time.time())
+            tar.addfile(info, io.BytesIO(meta_bytes))
+
+        raw = buf.getvalue()
+        logger.info("[Capsule] built: %d bytes", len(raw))
+        return raw
+
+    def build_fragment(self, code: bytes, index: int, total: int) -> bytes:
+        """Собрать фрагмент кода."""
+        chunk_size = (len(code) + total - 1) // total
+        start = index * chunk_size
+        end = min(start + chunk_size, len(code))
+        chunk = code[start:end]
+
+        header = json.dumps({
+            "index": index,
+            "total": total,
+            "chunk_size": chunk_size,
+            "checksum": hashlib.sha256(code).hexdigest()[:16],
+        }).encode("utf-8")
+
+        import struct
+        return struct.pack("!I", len(header)) + header + chunk
+
+    def estimate_size(self, include: Optional[List[str]] = None) -> int:
+        """Оценить размер."""
+        code = self.build_minimal(include)
+        return len(code)
+
+
+# ============================================================
+# CapsuleDeployer
+# ============================================================
+class CapsuleDeployer:
+    """Разворачивает capsule на доверенных узлах."""
+
+    def __init__(self, trusted: TrustedHosts, ssh_user: Optional[str] = None):
+        self.trusted = trusted
+        self.ssh_user = ssh_user
+        self.stats = {
+            "attempts": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+        }
+
+    def deploy(self, target: str, code: bytes,
+               method: str = "auto") -> bool:
+        """Развернуть capsule на target."""
+        if not self.trusted.is_trusted(target):
+            logger.warning("[Deploy] refused: %s not trusted", target)
+            self.stats["skipped"] += 1
+            return False
+
+        self.stats["attempts"] += 1
+        host_info = self.trusted.get(target) or {}
+        user = host_info.get("user") or self.ssh_user
+
+        methods = {
+            "ssh": lambda: self._deploy_ssh(target, code, user),
+            "smb": lambda: self._deploy_smb(target, code),
+            "adb": lambda: self._deploy_adb(target, code),
+            "http": lambda: self._deploy_http(target, code),
+        }
+
+        if method == "auto":
+            for m in ["ssh", "smb", "adb", "http"]:
+                logger.info("[Deploy] trying %s -> %s", m, target)
+                if methods[m]():
+                    self.stats["success"] += 1
+                    return True
+            self.stats["failed"] += 1
+            return False
+
+        fn = methods.get(method)
+        if not fn:
+            logger.warning("[Deploy] unknown method: %s", method)
+            self.stats["failed"] += 1
+            return False
+
+        ok = fn()
+        if ok:
+            self.stats["success"] += 1
+        else:
+            self.stats["failed"] += 1
+        return ok
+
+    def _deploy_ssh(self, target: str, code: bytes,
+                    user: Optional[str] = None) -> bool:
+        try:
+            host = target.split(":")[0]
+            user_prefix = f"{user}@" if user else ""
+            remote_path = "/tmp/inevionet_capsule.py.tar.gz"
+
+            # Write temp
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(
+                delete=False, suffix=".tar.gz")
+            tmp.write(code)
+            tmp.close()
+
+            # SCP
+            r = subprocess.run(
+                ["scp", "-o", "StrictHostKeyChecking=no",
+                 "-o", "ConnectTimeout=5",
+                 tmp.name, f"{user_prefix}{host}:{remote_path}"],
+                capture_output=True, timeout=20)
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+
+            if r.returncode != 0:
+                logger.debug("[Deploy] scp failed: %s",
+                             r.stderr.decode(errors="replace")[:200])
+                return False
+
+            # Extract + run
+            cmd = (
+                f"mkdir -p /tmp/inevionet && "
+                f"cd /tmp/inevionet && "
+                f"tar -xzf {remote_path} && "
+                f"nohup python3 -m inevionet.orchestrator "
+                f"--node-id capsule_{host.replace('.','_')} "
+                f">/tmp/inevionet.log 2>&1 &"
+            )
+            r = subprocess.run(
+                ["ssh", "-o", "StrictHostKeyChecking=no",
+                 "-o", "ConnectTimeout=5",
+                 f"{user_prefix}{host}", cmd],
+                capture_output=True, timeout=20)
+
+            if r.returncode == 0:
+                logger.info("[Deploy] ssh OK: %s", target)
+                return True
+            logger.debug("[Deploy] ssh run failed: %s",
+                         r.stderr.decode(errors="replace")[:200])
+            return False
+        except Exception as e:
+            logger.error("[Deploy] ssh error: %s", e)
+            return False
+
+    def _deploy_smb(self, target: str, code: bytes) -> bool:
+        try:
+            import tempfile
+            host = target.split(":")[0]
+            # Try typical admin share
+            remote = f"\\{host}\C$\InevioNet\capsule.tar.gz"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
+            tmp.write(code)
+            tmp.close()
+            try:
+                shutil_copy = __import__("shutil").copy2
+                shutil_copy(tmp.name, remote)
+                logger.info("[Deploy] smb OK: %s", target)
+                return True
+            finally:
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("[Deploy] smb error: %s", e)
+            return False
+
+    def _deploy_adb(self, target: str, code: bytes) -> bool:
+        try:
+            import tempfile
+            host = target.split(":")[0]
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
+            tmp.write(code)
+            tmp.close()
+            try:
+                r1 = subprocess.run(
+                    ["adb", "-s", host, "push", tmp.name,
+                     "/data/local/tmp/capsule.tar.gz"],
+                    capture_output=True, timeout=15)
+                if r1.returncode != 0:
+                    return False
+                r2 = subprocess.run(
+                    ["adb", "-s", host, "shell",
+                     "cd /data/local/tmp && tar -xzf capsule.tar.gz && "
+                     "nohup python3 -m inevionet.orchestrator &"],
+                    capture_output=True, timeout=15)
+                return r2.returncode == 0
+            finally:
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("[Deploy] adb error: %s", e)
+            return False
+
+    def _deploy_http(self, target: str, code: bytes) -> bool:
+        try:
+            import urllib.request
+            host = target.split(":")[0]
+            url = f"http://{host}:8081/api/capsule/receive"
+            req = urllib.request.Request(
+                url, data=code,
+                headers={"Content-Type": "application/octet-stream"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=10) as r:
+                ok = r.status == 200
+                if ok:
+                    logger.info("[Deploy] http OK: %s", target)
+                return ok
+        except Exception as e:
+            logger.debug("[Deploy] http error: %s", e)
+            return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        return dict(self.stats)

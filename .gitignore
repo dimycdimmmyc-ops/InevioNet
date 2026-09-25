@@ -1,3 +1,4 @@
+# ============ Python ============
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -9,30 +10,54 @@ venv/
 htmlcov/
 .coverage
 
-# DATA & SECRETS
-data/*
+# ============ ДАННЫЕ И СЕКРЕТЫ (НЕ ПУБЛИКОВАТЬ!) ============
+data/
 !data/.gitkeep
 *.key
 *.pem
 *.db
 secrets.env
 .env
+node_id*.txt
+serial*.txt
+p2_inbox*.json
+web_state*.json
+trusted_hosts*.json
+spores.json
+pheromones.json
+audit_chain.json
+super_nodes.json
+spores_findings.json
+tls/
 
-# LOGS
+# ============ ЛОГИ ============
 logs/
 *.log
+seed.log
 
-# BACKUPS
-*.bak*
+# ============ БЭКАПЫ И ПАТЧИ ============
+*.bak
+*.bak_p*
+*.bak_p1*
+*.bak_p2*
 _backup_*/
 _archive_broken/
 _transfer/
 installer_output/
 patch*.py
+build_*.py
 fix_*.py
+analyze_project.py
 
-# IDE
+# ============ IDE / OS ============
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+*.swp
+
+# ============ Временные ============
+tmp/
+temp/
+*.tmp
+~$*

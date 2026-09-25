@@ -1,15 +1,23 @@
-# InevioNet - Dual Licensing
+# InevioNet - Dual Licensing / Двойное лицензирование
+Copyright (c) 2026 dimon027081. All rights reserved.
 
-Copyright (c) 2026 dimon027081 (InevioNet Author). All rights reserved.
-
-This software is offered under a DUAL-LICENSE model. You may choose ONE of:
+This software is offered under a DUAL-LICENSE model.
+You may choose ONE of:
 
 1) GNU Affero General Public License v3.0 or later ("AGPL-3.0-or-later")
    Full text: see LICENSE-AGPL.txt
    For: open-source projects, research, non-commercial use.
+   Obligations: keep copyright notices; distribute source code; if you run
+   a modified version as a network service, you must offer the source to
+   all users of that service.
 
 2) InevioNet Commercial License v1.0
    Full text: see LICENSE-COMMERCIAL.md
-   For: commercial use WITHOUT AGPL obligations.
+   For: commercial use WITHOUT AGPL obligations (closed source, internal
+   deployment, SaaS without source disclosure). Requires a paid agreement.
 
 SPDX-License-Identifier: AGPL-3.0-or-later OR LicenseRef-InevioNet-Commercial-1.0
+
+By using, copying, modifying or distributing this software you agree to
+exactly ONE of the above licenses. Any use outside both licenses is
+copyright infringement.

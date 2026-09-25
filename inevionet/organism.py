@@ -29,6 +29,28 @@ from .core.logger import get_logger
 logger = get_logger("inevionet.organism")
 
 
+# ============================================================
+# Авторские утилиты (P116h)
+# ============================================================
+
+def _append(lst, x):
+    """Список + элемент (авторски, без list.append)."""
+    n = len(lst)
+    new_lst = [None] * (n + 1)
+    for i in range(n):
+        new_lst[i] = lst[i]
+    new_lst[n] = x
+    return new_lst
+
+
+def _copy(d):
+    """Копия словаря (авторски, без dict.copy)."""
+    new_d = {}
+    for k in d:
+        new_d[k] = d[k]
+    return new_d
+
+
 # Сокращённый список targets для traceroute (10 штук - быстро)
 TRACEROUTE_TARGETS_FAST = [
     "8.8.8.8", "8.8.4.4",           # Google
@@ -87,6 +109,16 @@ class Organism:
         self._load = 0.0
         self._phase_log = deque(maxlen=200)
         self._lock = threading.Lock()
+
+        # P110: кэши
+        self._scout_cache = None
+        self._dns_cache = None
+        try:
+            from .core.cache import LRUCache
+            self._scout_cache = LRUCache(max_size=500, ttl=300)  # 5 мин
+            logger.info("[P110] scout cache initialized")
+        except Exception as _ce:
+            logger.debug("[P110] cache: %s", _ce)
 
         # P95c: async traceroute (не блокирует scout)
         self._tr_result = []
@@ -416,6 +448,7 @@ class Organism:
                             "ip": ip, "type": "inevionet",
                             "node_id": h.get("label"),
                             "source": "trusted", "depth": 1,
+                            "parent": "127.0.0.1",
                         })
                         seen_ips.add(ip)
         except Exception as e:
@@ -461,6 +494,7 @@ class Organism:
                                 found.append({
                                     "ip": guess_ip, "type": "isp_router",
                                     "source": "isp_guess", "depth": 3,
+                                    "parent": "127.0.0.1",
                                 })
                                 seen_ips.add(guess_ip)
                                 c_isp += 1
@@ -523,6 +557,22 @@ class Organism:
             logger.debug("[NLP] pipeline not available")
         except Exception as e:
             logger.debug("[NLP] scout: %s", e)
+
+        # P110: кэшировать результаты scout
+        try:
+            if getattr(self, "_scout_cache", None):
+                for node in found:
+                    ip = node.get("ip", "")
+                    if ip:
+                        self._scout_cache.set(ip, node)
+        except Exception as _sce:
+            logger.debug("[P110] cache set: %s", _sce)
+
+        # P116g: публикуем карту в dead_drop при каждом scout
+        try:
+            self._publish_map_to_dead_drop()
+        except Exception as _pe:
+            logger.debug("[P116g] scout publish: %s", _pe)
 
         new_count = len(found)
         total_in_memory = len(self.memory["nodes"])
@@ -914,8 +964,280 @@ class Organism:
             logger.error("[Merge] %s: %s", remote_id, e)
             return 0
 
+    def _merge_from_dead_drop(self):
+        """P116: merge карт через dead_drop (fallback при NAT)."""
+        added_total = 0
+        try:
+            if not getattr(self.net, "dead_drop", None):
+                return 0
+            inbox = self.net.dead_drop.get_inbox() or []
+            if not inbox:
+                logger.debug("[Merge/DD] inbox empty")
+                return 0
+            logger.info("[Merge/DD] inbox size: %d", len(inbox))
+            for msg in inbox[-100:]:
+                receiver = msg.get("receiver", "")
+                if receiver not in ("broadcast", self.net.node_id, ""):
+                    continue
+                payload = msg.get("message", "")
+                if not payload:
+                    continue
+                try:
+                    import json as _j
+                    data = _j.loads(payload)
+                except Exception:
+                    continue
+                sender = data.get("node_id", "")
+                if not sender or sender == self.net.node_id:
+                    continue
+                # P119: p2_message
+                msg_type = data.get("type", "")
+                if msg_type == "p2_message":
+                    recv = data.get("receiver", "")
+                    if recv == self.net.node_id or recv == "broadcast":
+                        sender = data.get("sender", "")
+                        msg_text = data.get("message", "")
+                        try:
+                            from web import app as _app
+                            with _app.state_lock:
+                                box = list(_app._inbox[0])
+                                box.append({
+                                    "sender": sender,
+                                    "message": msg_text,
+                                    "ts": data.get("ts", time.time()),
+                                    "secure": True,
+                                })
+                                _app._inbox[0] = box[-100:]
+                            try:
+                                _app.socketio.emit('inbox_new', {
+                                    "sender": sender,
+                                    "message": msg_text,
+                                    "ts": data.get("ts", time.time()),
+                                })
+                            except Exception:
+                                pass
+                            logger.info("[P119] p2_message: %s -> %s", sender, self.net.node_id)
+                        except Exception as _ae:
+                            logger.debug("[P119] p2_inbox: %s", _ae)
+                    continue
+
+                nodes_in = data.get("nodes", []) or []
+                for item in nodes_in:
+                    if not isinstance(item, dict):
+                        continue
+                    ip = item.get("ip", "")
+                    if not ip:
+                        continue
+                    with self._lock:
+                        if ip in self.memory["nodes"]:
+                            continue
+                        node = dict(item)
+                        node["via_dead_drop"] = sender
+                        node["source"] = "merge_dd:" + str(node.get("source", "?"))
+                        node["depth"] = int(node.get("depth", 1)) + 1
+                        self.memory["nodes"][ip] = node
+                        added_total += 1
+                # Merge relayed/taught
+                for r in data.get("relayed", []) or []:
+                    self.memory.setdefault("relayed_ips", set()).add(r)
+                for t in data.get("taught", []) or []:
+                    self.memory.setdefault("taught", set()).add(t)
+                if added_total > 0:
+                    logger.info("[Merge/DD] from %s: +%d nodes", sender, added_total)
+        except Exception as e:
+            logger.debug("[Merge/DD] %s", e)
+        if added_total > 0:
+            with self._lock:
+                self.stats["maps_merged"] = self.stats.get("maps_merged", 0) + 1
+                self.stats["nodes_from_merge"] = self.stats.get("nodes_from_merge", 0) + added_total
+        return added_total
+
+    def _publish_map_to_dead_drop(self):
+        """P116g: публикуем карту в dead_drop через publish_now."""
+        logger.info("[P116g] _publish_map_to_dead_drop START")
+        try:
+            if not getattr(self.net, "dead_drop", None):
+                logger.warning("[P116g] no dead_drop object")
+                return False
+            logger.info("[P116g] dead_drop OK, building map...")
+            my_map = self._build_my_map_summary()
+            logger.info("[P116g] map built: %d nodes", len(my_map.get("nodes", [])))
+            import json as _j
+            payload = _j.dumps(my_map, ensure_ascii=False)
+            logger.info("[P116g] payload size: %d bytes", len(payload))
+            url = self.net.dead_drop.publish_now("broadcast", payload)
+            if url:
+                logger.info("[P116g] map published NOW: %s", url[:60])
+                return True
+            logger.warning("[P116g] publish_now returned None")
+            return False
+        except Exception as e:
+            import traceback
+            logger.error("[P116g] FAILED: %s\n%s", e, traceback.format_exc())
+            return False
+
+    def _publish_my_map_to_dht_peers(self):
+        """P112: публикуем свою карту в DHT-peer'ов через их HTTP-эндпоинт."""
+        try:
+            if not getattr(self.net, "dht_bootstrap", None):
+                return 0
+            peers = self.net.dht_bootstrap.get_peers()
+            my_map = self._build_my_map_summary()
+            published = 0
+            for peer in peers:
+                node_id = peer.get("node_id", "")
+                if not node_id or node_id == self.net.node_id:
+                    continue
+                pub_ip = peer.get("public_ip", "")
+                pub_port = peer.get("public_port", 0)
+                if not pub_ip or not pub_port:
+                    continue
+                try:
+                    import urllib.request as _u
+                    import ssl as _ssl
+                    import json as _j
+                    ctx = _ssl._create_unverified_context()
+                    payload = _j.dumps(my_map, ensure_ascii=False).encode("utf-8")
+                    for scheme in ("https", "http"):
+                        url = "%s://%s:%d/api/dht/merge" % (scheme, pub_ip, pub_port)
+                        try:
+                            req = _u.Request(
+                                url, data=payload,
+                                headers={"Content-Type": "application/json"},
+                                method="POST")
+                            with _u.urlopen(req, timeout=5, context=ctx) as r:
+                                resp = _j.loads(r.read().decode("utf-8"))
+                            if resp.get("success"):
+                                published += 1
+                                logger.info("[P112] published map to %s", node_id)
+                                break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug("[P112] %s: %s", node_id, e)
+            return published
+        except Exception as e:
+            logger.debug("[P112] publish: %s", e)
+            return 0
+
+    def _build_my_map_summary(self):
+        """P112: собрать карту для публикации."""
+        nodes = []
+        count = 0
+        for ip, node in self.memory.get("nodes", {}).items():
+            if count >= 100:
+                break
+            nodes = nodes + [{
+                "ip": ip,
+                "type": node.get("type", "device"),
+                "depth": node.get("depth", 1),
+                "source": node.get("source", "?"),
+                "vendor": node.get("vendor", ""),
+                "nlp_plan": node.get("nlp_plan", ""),
+                "can_teach": node.get("can_teach", False),
+                "can_relay": node.get("can_relay", False),
+            }]
+            count += 1
+        return {
+            "node_id": self.net.node_id,
+            "serial": getattr(self.net, "serial", ""),
+            "ts": time.time(),
+            "nodes": nodes,
+            "relayed": list(self.memory.get("relayed_ips", set())),
+            "taught": list(self.memory.get("taught", set())),
+            "depth": dict(self.memory.get("depth", {})),
+        }
+
+    def _merge_from_dht_peers(self):
+        """P109: Merge карт через DHT peers."""
+        added_total = 0
+        try:
+            if not getattr(self.net, "dht_bootstrap", None):
+                return 0
+            peers = self.net.dht_bootstrap.get_peers()
+            for peer in peers:
+                node_id = peer.get("node_id", "")
+                if not node_id or node_id == self.net.node_id:
+                    continue
+                # Пробуем получить карту через HTTP /api/organism
+                pub_ip = peer.get("public_ip", "")
+                pub_port = peer.get("public_port", 0)
+                if not pub_ip or not pub_port:
+                    continue
+                try:
+                    import urllib.request as _u
+                    import ssl as _ssl
+                    import json as _j
+                    ctx = _ssl._create_unverified_context()
+                    # Пробуем HTTPS (порт 8080) и HTTP
+                    for scheme in ("https", "http"):
+                        url = "%s://%s:%d/api/organism" % (scheme, pub_ip, pub_port)
+                        try:
+                            req = _u.Request(url, headers={"User-Agent": "InevioNet/1.0"})
+                            with _u.urlopen(req, timeout=3, context=ctx) as r:
+                                data = _j.loads(r.read().decode("utf-8"))
+                            if not data.get("success"):
+                                continue
+                            remote_nodes = data.get("nodes", []) or data.get("nodes_sample", [])
+                            for item in remote_nodes:
+                                if not isinstance(item, list) or len(item) < 2:
+                                    continue
+                                ip = item[0]
+                                node = item[1]
+                                if not ip or ip in self.memory["nodes"]:
+                                    continue
+                                # Merge новый узел
+                                node = dict(node)
+                                node["via_dht_peer"] = node_id
+                                node["source"] = "merge_dht:" + str(node.get("source", "?"))
+                                node["depth"] = int(node.get("depth", 1)) + 1
+                                with self._lock:
+                                    self.memory["nodes"][ip] = node
+                                added_total += 1
+                            if added_total > 0:
+                                logger.info("[Merge/DHT] from %s: +%d nodes", node_id, added_total)
+                            break  # нашли рабочий scheme
+                        except Exception as _e:
+                            continue
+                except Exception as e:
+                    logger.debug("[Merge/DHT] %s: %s", node_id, e)
+        except Exception as e:
+            logger.debug("[Merge/DHT] outer: %s", e)
+        if added_total > 0:
+            with self._lock:
+                self.stats["maps_merged"] = self.stats.get("maps_merged", 0) + 1
+                self.stats["nodes_from_merge"] = self.stats.get("nodes_from_merge", 0) + added_total
+        return added_total
+
     def merge_phase(self):
-        """P97: фаза merge - экспорт + broadcast + приём."""
+        """P116: фаза merge - DHT + dead_drop."""
+        # P116g: публикуем карту в dead_drop
+        try:
+            logger.info("[P116g] calling _publish_map_to_dead_drop...")
+            self._publish_map_to_dead_drop()
+        except Exception as e:
+            import traceback
+            logger.error("[P116g] publish DD FAILED: %s\n%s", e, traceback.format_exc())
+        # P112: publish свою карту в DHT-peers
+        try:
+            n = self._publish_my_map_to_dht_peers()
+            if n > 0:
+                logger.info("[P112] published to %d DHT-peers", n)
+        except Exception as e:
+            logger.debug("[P112] publish: %s", e)
+        # P109: DHT merge
+        try:
+            self._merge_from_dht_peers()
+        except Exception as e:
+            logger.debug("[Merge] DHT: %s", e)
+        # P116: dead_drop merge (fallback при NAT)
+        try:
+            n = self._merge_from_dead_drop()
+            if n > 0:
+                logger.info("[P116] merged +%d nodes from dead_drop", n)
+        except Exception as e:
+            logger.debug("[Merge] DD: %s", e)
+        # P97: dead_drop merge
         try:
             # 1. Экспорт своей карты
             my_map = self.export_map()
@@ -1009,27 +1331,75 @@ class Organism:
     # =================================================================
     
     def teach(self):
-        """Обучаю: SuperNode + evolution + masking."""
+        """P108: teach через SuperNode + Evolution + Masking."""
+        # 1. SuperNode broadcast
         try:
             if hasattr(self.net, "_supernode_loop_once"):
                 self.net._supernode_loop_once()
         except Exception as e:
             logger.debug("[Teach] supernode: %s", e)
-        
+
+        # 2. Evolution
         try:
-            if hasattr(self.net, "_evolution_once"):
-                self.net._evolution_once()
+            if hasattr(self.net, "evolution") and self.net.evolution:
+                # Один шаг эволюции
+                if hasattr(self.net.evolution, "evolve"):
+                    self.net.evolution.evolve()
+                elif hasattr(self.net.evolution, "step"):
+                    self.net.evolution.step()
+                # Записать успех для обученных узлов
+                taught_count = len(self.memory.get("taught", set()))
+                if taught_count > 0 and hasattr(self.net.evolution, "record_success"):
+                    for ip in list(self.memory.get("taught", set()))[:5]:
+                        try:
+                            self.net.evolution.record_success(ip)
+                        except Exception:
+                            pass
+                if hasattr(self.net.evolution, "get_stats"):
+                    st = self.net.evolution.get_stats()
+                    logger.debug("[Teach] evolution gen=%s best=%.3f",
+                                 st.get("generation", "?"),
+                                 st.get("best_fitness", 0.0))
         except Exception as e:
             logger.debug("[Teach] evolution: %s", e)
-        
+
+        # 3. Masking — адаптация под сеть
         try:
             if hasattr(self.net, "_multi_channel_loop_once"):
                 self.net._multi_channel_loop_once()
         except Exception as e:
             logger.debug("[Teach] masking: %s", e)
-        
-        self._log_phase("teach", 0, f"taught={len(self.memory['taught'])}")
-    
+
+        # 4. SuperNode — обучение узлов с высоким fitness
+        try:
+            if hasattr(self.net, "super_node") and self.net.super_node:
+                sn = self.net.super_node
+                # Продвинуть узлы с хорошим score
+                for ip, node in list(self.memory.get("nodes", {}).items())[:50]:
+                    score = node.get("score", 0)
+                    if score >= 0.7:
+                        try:
+                            if hasattr(sn, "promote"):
+                                sn.promote(ip)
+                            elif hasattr(sn, "mark_super"):
+                                sn.mark_super(ip)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug("[Teach] supernode promote: %s", e)
+
+        # 5. Audit: teach-событие
+        try:
+            if hasattr(self.net, "audit") and self.net.audit:
+                self.net.audit.add_event("teach", {
+                    "taught_count": len(self.memory.get("taught", set())),
+                    "relayed_count": len(self.memory.get("relayed_ips", set())),
+                    "nodes_count": len(self.memory.get("nodes", {})),
+                })
+        except Exception as e:
+            logger.debug("[Teach] audit: %s", e)
+
+        self._log_phase("teach", 0, f"taught={len(self.memory.get('taught', set()))}")
     # =================================================================
     # УТИЛИТЫ
     # =================================================================

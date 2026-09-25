@@ -1,0 +1,1246 @@
+"""InevioNet Orchestrator — MAIN CLASS (with industrial protocols)."""
+import time
+import threading
+from typing import Optional, Dict, Any, List, Tuple, Callable
+
+from .core.crypto import InevioCrypto, random_id
+from .core.packet import GDPPacket, create_packet
+from .core.logger import get_logger, init_default_logging
+from .core.constants import DataPaths, get_mode_config, DEFAULT_CONFIG
+from .core.cache import get_all_cache_stats, clear_all_caches
+from .core.exceptions import InevioException
+
+from .network.transport import UniversalTransport
+from .steganography.engine import SteganographyEngine
+from .evolution.engine import EvolutionEngine
+from .symbiotic.ecosystem import SymbioticEcosystem
+from .mycelium.engine import MyceliumEngine
+from .ai.selector import ProtocolSelector
+from .ai.recursion import WeightedRecursion
+
+logger = get_logger("inevionet.orchestrator")
+
+
+class InevioNet:
+    """
+    Главный класс InevioNet.
+
+    Использование:
+        >>> net = InevioNet("my_password")
+        >>> net.send("alice", b"Hello!")
+        >>> success, packet = net.send_with_guarantee("bob", "Critical!")
+        >>> net.stop()
+    """
+
+    def __init__(self, password, node_id=None, mode="standard",
+                 auto_start=True, log_level="INFO"):
+        init_default_logging(log_level)
+        self.password = password
+        self.node_id = node_id or f"inevionet_{random_id('', 6)}"
+        self.mode = mode
+        self.config = get_mode_config(mode)
+        DataPaths.ensure_all()
+
+        # Crypto
+        self.crypto = InevioCrypto(password)
+
+        # Core components
+        self.transport = UniversalTransport(
+            timeout=self.config.get("network", {}).get("connect_timeout_sec", 5.0))
+        self.stealth = SteganographyEngine()
+        # P13: I2P integration
+        try:
+            from .network.i2p_transport import I2PTransport
+            self.i2p = I2PTransport()
+        except Exception as _e:
+            self.i2p = None
+            logger.debug('[I2P] init skipped: %s', _e)
+        self.evolution = EvolutionEngine(
+            population_size=self.config.get("evolution", {}).get("population_size", 20),
+            mutation_rate=self.config.get("evolution", {}).get("mutation_rate", 0.01))
+        self.ecosystem = SymbioticEcosystem()
+        self.mycelium = MyceliumEngine(node_id=self.node_id)
+        self.selector = ProtocolSelector()
+        self.recursion = WeightedRecursion(
+            max_depth=self.config.get("recursion", {}).get("max_depth", 5),
+            probability_threshold=self.config.get("ai", {}).get("probability_threshold", 0.95))
+
+        # Identity / Discovery
+        self._identity = None
+        self._registry = None
+        self._trust = None
+        self._presence = None
+        self._discovery = None
+        self._discovery_lock = threading.Lock()
+
+        # Event handlers
+        self._handlers: Dict[str, List[Callable]] = {
+            "on_send": [], "on_receive": [], "on_delivery": [], "on_error": [],
+            "on_peer_discovered": []}
+
+        # State
+        self._running = False
+        self._lock = threading.Lock()
+
+        # Statistics
+        self.stats = {
+            "packets_sent": 0, "packets_received": 0,
+            "packets_delivered": 0, "packets_failed": 0,
+            "bytes_sent": 0, "bytes_received": 0,
+            "start_time": time.time(), "uptime": 0.0,
+        }
+
+        # Storage
+        self.received_packets: Dict[str, GDPPacket] = {}
+        self.sent_packets: Dict[str, GDPPacket] = {}
+
+        logger.info(f"InevioNet created: node_id={self.node_id}, mode={mode}")
+
+        if auto_start:
+            self.start()
+
+    # --- Lifecycle ---
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        try:
+            self._ensure_identity()
+        except Exception as e:
+            logger.warning(f"Identity init error: {e}")
+        try:
+            self.evolution.initialize()
+        except Exception as e:
+            logger.error(f"Evolution init error: {e}")
+        try:
+            self.ecosystem.create_standard_networks()
+        except Exception as e:
+            logger.error(f"Ecosystem init error: {e}")
+        try:
+            self.mycelium.start()
+        except Exception as e:
+            logger.error(f"Mycelium start error: {e}")
+        try:
+            self._start_discovery()
+        except Exception as e:
+            logger.warning(f"Discovery start error: {e}")
+        # P13: topology hook
+        try:
+            import threading as _th
+            _th.Thread(target=self._topology_loop, daemon=True, name='topology_loop').start()
+            logger.info('[Relay] topology loop started')
+        except Exception as _e:
+            logger.debug('[Relay] topology hook error: %s', _e)
+        logger.info(f"InevioNet started: {self.node_id}")
+
+    def _ensure_identity(self):
+        if self._identity is not None:
+            return self._identity
+        from .identity import (DeviceIdentity, DeviceType, DeviceRole,
+                               DeviceRegistry, TrustEngine,
+                               PresenceManager, PresenceStatus)
+        self._identity = DeviceIdentity.create(
+            device_type=DeviceType.ENDPOINT,
+            role=DeviceRole.PEER,
+            nickname=self.node_id)
+        self._registry = DeviceRegistry()
+        self._registry.register_local(self._identity)
+        self._trust = TrustEngine(local_id=self._identity.device_id.device_id)
+        self._presence = PresenceManager()
+        self._presence.heartbeat(self._identity.device_id.device_id,
+                                 PresenceStatus.ONLINE)
+        return self._identity
+
+    def _start_discovery(self):
+        with self._discovery_lock:
+            if self._discovery is not None:
+                return self._discovery
+            from .identity.discovery import DiscoveryEngine
+            self._discovery = DiscoveryEngine(
+                identity=self._identity,
+                registry=self._registry,
+                broadcast_port=9555,
+                enable_multicast=True,
+                enable_beacon=True,
+            )
+            def _on_peer(ann):
+                try:
+                    for h in self._handlers.get("on_peer_discovered", []):
+                        try: h(ann)
+                        except Exception: pass
+                except Exception:
+                    pass
+            self._discovery.on_discovered(_on_peer)
+            self._discovery.start()
+            return self._discovery
+
+    def stop(self):
+        if not self._running:
+            return
+        self._running = False
+        try:
+            if self._discovery: self._discovery.stop()
+        except Exception: pass
+        try: self.mycelium.stop()
+        except Exception: pass
+        try: self.transport.close()
+        except Exception: pass
+        try: self.stealth.close()
+        except Exception: pass
+        logger.info("InevioNet stopped")
+
+    # --- Utilities ---
+    def _prepare_payload(self, payload):
+        import json
+        if isinstance(payload, bytes): return payload
+        if isinstance(payload, str): return payload.encode("utf-8")
+        if isinstance(payload, (dict, list)):
+            return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        if isinstance(payload, (int, float, bool)): return str(payload).encode("utf-8")
+        if payload is None: return b""
+        return str(payload).encode("utf-8")
+
+    def _decode_payload(self, payload):
+        import json
+        try:
+            text = payload.decode("utf-8")
+            if text.startswith(("{", "[")):
+                try: return json.loads(text)
+                except json.JSONDecodeError: pass
+            return text
+        except UnicodeDecodeError:
+            return payload
+
+    def _estimate_entropy(self, data):
+        if not data: return 0.0
+        from collections import Counter
+        import math
+        counter = Counter(data)
+        length = len(data)
+        entropy = 0.0
+        for count in counter.values():
+            p = count / length
+            if p > 0:
+                entropy -= p * math.log2(p)
+        return min(1.0, entropy / 8.0)
+
+    def _map_protocol(self, protocol):
+        mapping = {
+            "TCP": "TCP", "UDP": "UDP",
+            "HTTPS": "HTTP", "HTTP": "HTTP",
+            "DNS": "DNS", "ICMP": "ICMP",
+            "WEBSOCKET": "WebSocket",
+            "MQTT": "MQTT", "MODBUS": "MODBUS",
+            "DNP3": "DNP3", "OPCUA": "OPCUA", "OPC-UA": "OPCUA",
+        }
+        return mapping.get(protocol.upper(), "HTTP")
+
+    def _parse_packet(self, data):
+        if isinstance(data, GDPPacket): return data
+        if isinstance(data, str):
+            try: data = bytes.fromhex(data)
+            except ValueError:
+                try: return GDPPacket.from_json(data)
+                except Exception: return None
+        if isinstance(data, bytes):
+            try: return GDPPacket.from_bytes(data)
+            except Exception:
+                try: return GDPPacket.from_json(data.decode("utf-8"))
+                except Exception: return None
+        return None
+
+    def _resolve_target(self, receiver: str) -> str:
+        """Превратить node_id/SSID/IP в target для transport.send().
+
+        Индустриальные адреса (host:port где port ∈ {502, 1883, 20000, 4840})
+        возвращаются как есть — transport._send_auto их распознает.
+        """
+        if not receiver:
+            return ""
+        r = receiver.strip()
+
+        # P12-Fix-10: self-loopback — знаем свой endpoint
+        if r == self.node_id:
+            return "127.0.0.1:8080" 
+        import re
+        # host:port
+        if re.match(r'^\d+\.\d+\.\d+\.\d+:\d+$', r):
+            return r
+        # IP
+        if re.match(r'^\d+\.\d+\.\d+\.\d+$', r):
+            return r
+        # URL
+        if r.startswith(("http://", "https://", "ws://", "wss://")):
+            return r
+        # discovery
+        try:
+            if self._discovery is not None:
+                for ann in self._discovery.get_discovered():
+                    if ann.device_id == r and ann.endpoint:
+                        return ann.endpoint
+        except Exception:
+            pass
+        # hostname
+        if re.match(r'^[a-zA-Z0-9.\-]+\.(com|org|net|ru|io|local)$', r):
+            return r
+        # hostname:port (для индустриальных)
+        if re.match(r'^[a-zA-Z0-9.\-]+:\d+$', r):
+            return r
+        return ""
+
+    # --- Send / Receive ---
+    def send(self, receiver, payload, protocol=None, priority=5,
+             use_stealth=None, stealth_method=None, metadata=None):
+        try:
+            data_bytes = self._prepare_payload(payload)
+            encrypted = self.crypto.encrypt(data_bytes)
+            if protocol is None or protocol.lower() == "auto":
+                protocol = self.selector.select() or "HTTPS"
+
+            # P13: auto-select strategies from best genome
+            best_genome = self.evolution.get_best_genome() if self.evolution else None
+            if use_stealth is None:
+                use_stealth = best_genome.use_stego if best_genome else False
+            if stealth_method is None:
+                stealth_method = best_genome.stego_method if best_genome else "HTTP_HEADERS"
+
+            packet = create_packet(
+                sender=self.node_id, receiver=receiver,
+                payload=encrypted, protocol=protocol,
+                priority=priority, metadata=metadata or {})
+            packet._is_encrypted = True
+            packet.sign(self.crypto.get_signing_keypair().private_key)
+            target = self._resolve_target(receiver)
+            success = False
+            used_method = None
+            if use_stealth:
+                result = self.stealth.send(
+                    data=packet.to_bytes(), method=stealth_method, target=target)
+                success = result.success
+                used_method = ("stego", stealth_method)
+            else:
+                result = self.transport.send(
+                    data=packet.to_bytes(),
+                    protocol=self._map_protocol(protocol),
+                    target=target)
+                success = result.success
+                used_method = ("protocol", protocol)
+
+                # P13: fallback to steganography
+                if not success:
+                    logger.info("[Stealth] fallback to steganography")
+                    stego_result = self.stealth.send_auto(
+                        data=packet.to_bytes(),
+                        target=target,
+                        priorities=["HTTP_HEADERS", "DNS_QNAME", "ICMP_PAYLOAD"])
+                    if stego_result.success:
+                        success = True
+                        used_method = ("stego", stego_result.method)
+                        logger.info("[Stealth] delivered via %s", stego_result.method)
+
+            # P13: reward for evolution
+            if self.evolution and used_method:
+                s_type, s_val = used_method
+                self.evolution.reward(s_type, s_val, success)
+
+            with self._lock:
+                self.stats["packets_sent"] += 1
+                self.stats["bytes_sent"] += len(data_bytes)
+                if success:
+                    self.stats["packets_delivered"] += 1
+                    self.selector.record_success(protocol)
+                else:
+                    self.stats["packets_failed"] += 1
+                    self.selector.record_failure(protocol)
+                self.sent_packets[packet.packet_id] = packet
+            self._trigger_event("on_send", packet)
+            if success:
+                self._trigger_event("on_delivery", packet)
+            return packet
+        except Exception as e:
+            logger.error(f"Send error: {e}")
+            self._trigger_event("on_error", {"error": str(e)})
+            return None
+    def send_with_guarantee(self, receiver, payload, protocols=None,
+                            max_attempts=5, context=None, expect_ack=False):
+        """Отправка с гарантией: перебор протоколов + маскировка + target.
+
+        Расширенный список включает индустриальные протоколы (MQTT/Modbus/
+        DNP3/OPC-UA). Если target имеет порт 1883/502/20000/4840 — соответствующий
+        протокол пробуется первым.
+        """
+        data_bytes = self._prepare_payload(payload)
+        encrypted = self.crypto.encrypt(data_bytes)
+
+        # Определяем target и, если он указывает на индустриальный порт,
+        # ставим соответствующий протокол первым.
+        target = self._resolve_target(receiver)
+        default_protocols = ["HTTPS", "DNS", "HTTP", "ICMP", "WebSocket",
+                             "MQTT", "MODBUS", "DNP3", "OPCUA", "I2P"]
+
+        if target and ":" in target and not target.startswith(("http://", "https://")):
+            try:
+                _, port_s = target.rsplit(":", 1)
+                port = int(port_s)
+                port_proto = {
+                    1883: "MQTT", 8883: "MQTT",
+                    502: "MODBUS",
+                    20000: "DNP3",
+                    4840: "OPCUA",
+                }
+                if port in port_proto:
+                    p = port_proto[port]
+                    # ставим первым, остальные после
+                    default_protocols = [p] + [x for x in default_protocols if x != p]
+            except (ValueError, IndexError):
+                pass
+
+        protocols = protocols or default_protocols
+
+        # P12-Fix-2: спрашиваем феромоны — какой протокол работает для этой сети
+        _myc = getattr(self, "mycelium", None)
+        _pheromone_best = None
+        if _myc is not None:
+            try:
+                _pheromone_best = _myc.pheromones.get_best_protocol(
+                    source=self.node_id, destination=receiver)
+                if _pheromone_best:
+                    protocols = [_pheromone_best] + [
+                        p for p in protocols if p != _pheromone_best]
+                    logger.debug(
+                        "[Pheromone] best=%s для %s", _pheromone_best, receiver)
+            except Exception as _e:
+                logger.debug("[Pheromone] get_best_protocol: %s", _e)
+
+        packet = create_packet(
+            sender=self.node_id, receiver=receiver,
+            payload=encrypted, protocol="auto", priority=8,
+            max_hops=50, expect_ack=expect_ack)  # P11.3 + P12-Fix-4
+        packet._is_encrypted = True
+        packet.sign(self.crypto.get_signing_keypair().private_key)
+
+        masking = getattr(self, "_masking_engine", None)
+        use_masking = bool(masking) and hasattr(masking, "mask")
+
+        alternatives = []
+        for proto in protocols:
+            metrics = {
+                "reliability": 0.9 if proto in ("HTTPS", "MQTT", "MODBUS") else 0.6,
+                "speed": 0.8 if proto == "UDP" else 0.6,
+                "stealth": 0.95 if proto in ("DNS", "MQTT") else 0.6,
+            }
+            alternatives.append({
+                "name": proto,
+                "metrics": metrics,
+                "protocol": proto,
+            })
+
+        # P12-Fix-11: self-loopback — не маскируем, идём прямо
+        _is_self = (target == "127.0.0.1:8080")
+
+        # P12-Fix-12: self → POST /api/relay с JSON body
+        def _send_to_self_http(pkt):
+            import urllib.request as _urlreq
+            import json as _json
+            try:
+                payload = _json.dumps({
+                    "packet_hex": pkt.to_bytes().hex(),
+                    "from": self.node_id,
+                    "ts": time.time(),
+                }).encode("utf-8")
+                req = _urlreq.Request(
+                    "https://127.0.0.1:8080/api/relay",
+                    data=payload,
+                    headers={"Content-Type": "application/json"})
+                import ssl as _ssl_mod   # P12-Fix-14
+                _ctx = _ssl_mod._create_unverified_context()
+                with _urlreq.urlopen(req, timeout=5, context=_ctx) as resp:
+                    data = _json.loads(resp.read().decode("utf-8"))
+                    return bool(data.get("success"))
+            except Exception as _e:
+                logger.debug("[Self] _send_to_self_http: %s", _e)
+                return False
+
+        def try_delivery(alt, depth):
+            proto = alt["protocol"]
+            if proto == 'I2P':
+                ok, resp = self.send_via_i2p(packet.to_bytes(), target if target else 'i2p-projekt.i2p')
+                if ok:
+                    if self.evolution:
+                        self.evolution.reward('protocol', 'I2P', True)
+                    return True, 0.95
+                return False, 0.3
+            try:
+                # P12-Fix-12: self — сразу POST /api/relay
+                if _is_self:
+                    ok_self = _send_to_self_http(packet)
+                    if ok_self:
+                        logger.debug("[Self] packet %s доставлен на /api/relay", packet.packet_id[:16])
+                        return True, 0.99
+                    return False, 0.1
+
+                # 1. маскировка (если включена), но НЕ для self
+                if use_masking and not _is_self:
+                    try:
+                        result = masking.mask(
+                            packet=packet, node=receiver,
+                            polymorphic=(proto == "Polymorphic"),
+                            context=context,
+                            preferred_channel=proto if proto in (
+                                "MQTT", "MODBUS", "DNP3", "OPCUA") else None,
+                        )
+                        if getattr(result, "success", False):
+                            try:
+                                masking.learn_from_result(
+                                    receiver,
+                                    getattr(result, "channel", proto),
+                                    True)
+                            except Exception:
+                                pass
+                            return True, 0.99
+                    except Exception as e:
+                        logger.debug(f"[Mask] {proto}: {e}")
+                # 2. прямая отправка с target
+                result = self.transport.send(
+                    data=packet.to_bytes(),
+                    protocol=self._map_protocol(proto),
+                    target=target)
+                if result.success:
+                    if use_masking:
+                        try:
+                            masking.learn_from_result(receiver, proto, True)
+                        except Exception:
+                            pass
+                    # P12-Fix-2: феромоны — успех
+                    if _myc is not None:
+                        try:
+                            _myc.pheromones.mark_result(
+                                source=self.node_id, destination=receiver,
+                                protocol=proto, success=True)
+                        except Exception:
+                            pass
+                    return True, 0.98
+                # 3. провал → учимся
+                if use_masking:
+                    try:
+                        masking.learn_from_result(receiver, proto, False)
+                    except Exception:
+                        pass
+                # P12-Fix-2: феромоны — провал
+                if _myc is not None:
+                    try:
+                        _myc.pheromones.mark_result(
+                            source=self.node_id, destination=receiver,
+                            protocol=proto, success=False)
+                    except Exception:
+                        pass
+                return False, 0.3
+            except Exception as e:
+                logger.debug(f"[Guarantee] {proto}: {e}")
+                return False, 0.1
+
+        rec_result = self.recursion.execute(
+            alternatives=alternatives, try_func=try_delivery)
+        success = rec_result.success
+        with self._lock:
+            self.stats["packets_sent"] += 1
+            self.stats["bytes_sent"] += len(data_bytes)
+            if success:
+                self.stats["packets_delivered"] += 1
+                packet.protocol = rec_result.path[0] if rec_result.path else "auto"
+            else:
+                self.stats["packets_failed"] += 1
+            self.sent_packets[packet.packet_id] = packet
+        return success, packet
+
+    def send_via_i2p(self, data, target='i2p-projekt.i2p'):
+        # P13: I2P integration - send via SAM bridge
+        if not getattr(self, 'i2p', None):
+            return False, None
+        try:
+            if not self.i2p.is_available():
+                return False, None
+            host = target
+            port = 80
+            if ':' in target:
+                parts = target.rsplit(':', 1)
+                try:
+                    host = parts[0]
+                    port = int(parts[1])
+                except ValueError:
+                    pass
+            ok, resp = self.i2p.send(data, host, port)
+            if ok:
+                logger.info('[I2P] delivered %dB to %s', len(data), target)
+            return ok, resp
+        except Exception as e:
+            logger.debug('[I2P] send error: %s', e)
+            return False, None
+
+    def _topology_loop(self):
+        # P13: topology every 30s (fixed stats)
+        import time as _t
+        while getattr(self, '_running', False):
+            _t.sleep(30)
+            if not getattr(self, '_running', False):
+                break
+            try:
+                topo = self.enable_auto_topology()
+                info = topo.build_from_scanner(min_quality=0.2)
+                if info.get('success'):
+                    # P13: get_stats from SAME object
+                    stats = topo.get_stats()
+                    logger.info('[Topology] nodes=%d edges=%d connected=%s',
+                                stats.get('nodes', 0),
+                                stats.get('edges', 0),
+                                stats.get('is_connected', False))
+                    # P13: test shortest_path if possible
+                    try:
+                        if hasattr(topo, 'shortest_path'):
+                            nodes = list(getattr(topo, 'nodes', {}).keys())
+                            if len(nodes) >= 2:
+                                src = nodes[0]
+                                dst = nodes[-1]
+                                path = topo.shortest_path(src, dst)
+                                if path:
+                                    logger.info('[Topology] path %s -> %s: %s',
+                                                src[:16], dst[:16],
+                                                ' -> '.join(p[:12] for p in path))
+                    except Exception as _e:
+                        logger.debug('[Topology] shortest_path test: %s', _e)
+            except Exception as e:
+                logger.debug('[Topology] loop error: %s', e)
+    def _forward_packet(self, packet, next_hop):
+        # P13: forward relay packet
+        try:
+            target = self._resolve_target(next_hop)
+            if not target:
+                logger.warning('[Relay] no target for %s', next_hop)
+                return False
+            result = self.transport.send(
+                data=packet.to_bytes(),
+                protocol=self._map_protocol(packet.protocol or 'HTTPS'),
+                target=target)
+            if result.success:
+                logger.info('[Relay] Forwarded %s to %s (hop %d/%d)',
+                            packet.packet_id[:16], next_hop,
+                            packet.hop_count, packet.max_hops)
+                return True
+            return False
+        except Exception as e:
+            logger.error('[Relay] forward error: %s', e)
+            return False
+
+    def _try_relay_chain(self, packet, receiver):
+        # P13: try chain routing
+        try:
+            topo = self.enable_auto_topology()
+            path = None
+            if hasattr(topo, 'shortest_path'):
+                path = topo.shortest_path(self.node_id, receiver)
+            if not path or len(path) < 2:
+                return False, None
+            next_hop = path[1] if len(path) > 1 else None
+            if not next_hop or next_hop == receiver:
+                return False, None
+            packet.route_to = next_hop
+            packet.max_hops = max(2, len(path) - 1)
+            packet.origin = self.node_id
+            packet.metadata['full_path'] = path
+            logger.info('[Relay] Chain: %s', ' -> '.join(path))
+            target = self._resolve_target(next_hop)
+            if not target:
+                return False, None
+            result = self.transport.send(
+                data=packet.to_bytes(),
+                protocol=self._map_protocol(packet.protocol or 'HTTPS'),
+                target=target)
+            return result.success, path
+        except Exception as e:
+            logger.debug('[Relay] chain error: %s', e)
+            return False, None
+
+    def send_text(self, receiver, text, **kwargs):
+        return self.send(receiver, text.encode("utf-8"), **kwargs)
+
+    def send_json(self, receiver, data, **kwargs):
+        import json
+        return self.send(receiver, json.dumps(data, ensure_ascii=False), **kwargs)
+
+    def receive(self, packet_data):
+        try:
+            packet = self._parse_packet(packet_data)
+            if not packet: return False, None
+            # P13: verify signature
+            try:
+                if hasattr(packet, "signature") and packet.signature:
+                    sender_id = getattr(packet, "sender", "")
+                    pub_key = None
+                    if self._registry and sender_id:
+                        try:
+                            rec = self._registry.get_device(sender_id)
+                            if rec and hasattr(rec, "public_key"):
+                                pub_key = rec.public_key
+                        except Exception:
+                            pass
+                    if pub_key:
+                        if not packet.verify(pub_key):
+                            logger.warning("[Crypto] INVALID signature from %s", sender_id)
+                            return False, None
+            except Exception as e:
+                logger.debug("[Crypto] verify error: %s", e)
+
+            payload = packet.payload
+            if getattr(packet, "_is_encrypted", False):
+                try: payload = self.crypto.decrypt(payload)
+                except Exception as e:
+                    logger.warning(f"Decrypt error: {e}")
+                    return False, None
+            decoded = self._decode_payload(payload)
+            with self._lock:
+                self.stats["packets_received"] += 1
+                self.stats["bytes_received"] += len(packet.payload)
+                self.received_packets[packet.packet_id] = packet
+            self.mycelium.record_success(
+                source=packet.sender, destination=packet.receiver,
+                protocol=packet.protocol)
+            self._trigger_event("on_receive", packet)
+            return True, decoded
+        except Exception as e:
+            logger.error(f"Receive error: {e}")
+            return False, None
+
+    # --- Mycelium ---
+    def spread_mycelium(self, networks=None):
+        return self.mycelium.auto_infiltrate(networks)
+
+    def spread_data(self, data):
+        data_bytes = self._prepare_payload(data)
+        return self.mycelium.spread(data_bytes)
+
+    def harvest(self):
+        packets = self.mycelium.harvest_packets()
+        results = []
+        for packet in packets:
+            success, data = self.receive(packet)
+            if success:
+                results.append(data)
+        return results
+
+    # --- Evolution ---
+    def evolve(self, generations=10):
+        return self.evolution.evolve_multiple(generations)
+
+    def get_best_genome(self):
+        return self.evolution.get_best_genome()
+
+    # --- Events ---
+    def register_handler(self, event, handler):
+        if event in self._handlers: self._handlers[event].append(handler)
+        else: self._handlers[event] = [handler]
+
+    def _trigger_event(self, event, data):
+        for handler in self._handlers.get(event, []):
+            try: handler(data)
+            except Exception as e: logger.error(f"Handler error {event}: {e}")
+
+    # --- Discovery ---
+    def get_discovered_peers(self):
+        if self._discovery is None: return []
+        try:
+            return [{
+                "device_id": ann.device_id,
+                "device_type": ann.device_type,
+                "nickname": ann.nickname,
+                "endpoint": ann.endpoint,
+                "metadata": ann.metadata,
+                "timestamp": ann.timestamp,
+            } for ann in self._discovery.get_discovered()]
+        except Exception:
+            return []
+
+    def get_discovery_stats(self):
+        if self._discovery is None: return {"running": False}
+        try: return self._discovery.get_stats()
+        except Exception: return {"running": False}
+
+    # --- Stats ---
+    def get_stats(self):
+        with self._lock:
+            self.stats["uptime"] = time.time() - self.stats["start_time"]
+            base_stats = dict(self.stats)
+        return {
+            **base_stats,
+            "node_id": self.node_id,
+            "mode": self.mode,
+            "running": self._running,
+            "sent_count": len(self.sent_packets),
+            "received_count": len(self.received_packets),
+            "selector": self.selector.get_stats(),
+            "i2p": self.i2p.get_stats() if getattr(self, 'i2p', None) else {'available': False},
+            "mycelium": self.mycelium.get_stats(),
+            "ecosystem": self.ecosystem.get_stats(),
+            "evolution": self.evolution.get_stats(),
+            "recursion": self.recursion.get_stats(),
+            "cache": get_all_cache_stats(),
+            "discovery": self.get_discovery_stats(),
+        }
+
+    def print_stats(self):
+        stats = self.get_stats()
+        print("=" * 70)
+        print("  INEVIONET - STATS")
+        print("=" * 70)
+        print(f"  Node ID: {stats['node_id']}")
+        print(f"  Mode: {stats['mode']}")
+        print(f"  Uptime: {stats['uptime']:.1f} sec")
+        print()
+        print(f"  Sent: {stats['packets_sent']}")
+        print(f"  Received: {stats['packets_received']}")
+        print(f"  Delivered: {stats['packets_delivered']}")
+        print(f"  Failed: {stats['packets_failed']}")
+        if stats['packets_sent'] > 0:
+            rate = stats['packets_delivered'] / stats['packets_sent'] * 100
+            print(f"  Delivery rate: {rate:.1f}%")
+        print()
+        print(f"  Selector: {stats['selector']}")
+        print(f"  Cache: {stats['cache']['kl_cache']['size']} KL entries")
+        print(f"  Discovery: {stats['discovery']}")
+        print("=" * 70)
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *args):
+        self.stop()
+
+    def __repr__(self):
+        return (f"InevioNet(node_id={self.node_id}, "
+                f"mode={self.mode}, running={self._running})")
+
+
+# ============================================================
+# ORCHESTRATOR EXTENSIONS
+# ============================================================
+
+def _add_orchestrator_extensions():
+    """Placeholder for extensions."""
+    pass
+
+
+if __name__ == "__main__":
+    print("Testing InevioNet...")
+    net = InevioNet(
+        password="test_password",
+        node_id="test_node",
+        mode="standard",
+        auto_start=True)
+    print(f"Created: {net}")
+    packet = net.send("alice", "Hello, InevioNet!")
+    if packet:
+        print(f"Packet: {packet.packet_id[:16]}")
+        print(f"Protocol: {packet.protocol}")
+    success, packet = net.send_with_guarantee("bob", "Critical message")
+    print(f"Guaranteed: {success}")
+    net.print_stats()
+    net.stop()
+    print("InevioNet module OK")
+
+
+# ================================================================
+# МАСКИРОВКА (Firewall/DPI Bypass)
+# ================================================================
+
+def _enable_masking_impl(self, dpi_profile="medium"):
+    from .masking.masking_engine import MaskingEngine
+    if not hasattr(self, '_masking_engine') or self._masking_engine is None:
+        self._masking_engine = MaskingEngine(dpi_profile=dpi_profile)
+    self.masking_enabled = True
+    logger.info(f"Masking enabled (DPI: {dpi_profile})")
+    return self._masking_engine
+
+
+def _disable_masking_impl(self):
+    self.masking_enabled = False
+    logger.info("Masking disabled")
+
+
+def _masking_property(self):
+    if not hasattr(self, '_masking_engine') or self._masking_engine is None:
+        self.enable_masking()
+    return self._masking_engine
+
+
+def _probe_node_impl(self, node):
+    if not hasattr(self, 'masking_enabled') or not self.masking_enabled:
+        self.enable_masking()
+    return self._masking_engine.probe_node(node)
+
+
+def _send_masked_impl(self, receiver, payload, polymorphic=False, context=None):
+    if not hasattr(self, 'masking_enabled') or not self.masking_enabled:
+        self.enable_masking()
+    data = self._prepare_payload(payload)
+    encrypted = self.crypto.encrypt(data)
+    packet = create_packet(
+        sender=self.node_id, receiver=receiver,
+        payload=encrypted, protocol="auto", priority=8)
+    packet._is_encrypted = True
+    packet.sign(self.crypto.get_signing_keypair().private_key)
+    result = self._masking_engine.mask(
+        packet, receiver, polymorphic=polymorphic, context=context)
+    if result.success:
+        self._masking_engine.learn_from_result(receiver, result.channel, True)
+        return True, packet
+    return False, packet
+
+
+def _get_masking_stats_impl(self):
+    if not hasattr(self, '_masking_engine') or self._masking_engine is None:
+        return {}
+    return self._masking_engine.get_stats()
+
+
+# Bind to class
+InevioNet.enable_masking = _enable_masking_impl
+InevioNet.disable_masking = _disable_masking_impl
+InevioNet.masking = property(_masking_property)
+InevioNet.probe_node = _probe_node_impl
+InevioNet.send_masked = _send_masked_impl
+InevioNet.get_masking_stats = _get_masking_stats_impl
+
+
+# ================================================================
+# RF + MESH + AMBIENT ИНТЕГРАЦИЯ
+# ================================================================
+
+def _enable_rf_scanning_impl(self, interface=None, wifi_provider=None):
+    # P13: wifi_provider fix
+    from .network.rf_scanner import RFScanner
+    if not hasattr(self, '_rf_scanner') or self._rf_scanner is None:
+        self._rf_scanner = RFScanner(
+            interface=interface,
+            wifi_provider=wifi_provider,
+        )
+        logger.info(f"RF scanning enabled: {self._rf_scanner}")
+    return self._rf_scanner
+def _enable_auto_topology_impl(self):
+    from .mesh.auto_topology import AutoTopology
+    if not hasattr(self, '_auto_topology') or self._auto_topology is None:
+        scanner = self.enable_rf_scanning()
+        self._auto_topology = AutoTopology(rf_scanner=scanner)
+        logger.info(f"Auto topology enabled: {self._auto_topology}")
+    return self._auto_topology
+
+
+def _enable_ambient_masking_impl(self, adaptation_strength=0.7):
+    from .masking.ambient import AmbientMasker
+    if not hasattr(self, '_ambient_masker') or self._ambient_masker is None:
+        self._ambient_masker = AmbientMasker(adaptation_strength=adaptation_strength)
+        logger.info(f"Ambient masking enabled")
+    return self._ambient_masker
+
+
+def _enable_spatial_model_impl(self, density_per_km2=100.0, detection_range_km=0.1):
+    from .masking.ambient import SpatialDensityModel
+    if not hasattr(self, '_spatial_model') or self._spatial_model is None:
+        self._spatial_model = SpatialDensityModel(
+            density_per_km2=density_per_km2,
+            detection_range_km=detection_range_km)
+    return self._spatial_model
+
+
+def _scan_environment_impl(self):
+    scanner = self.enable_rf_scanning()
+    result = scanner.scan_all()
+    density = scanner.estimate_rf_density()
+    return {
+        "scan": {
+            "success": result.success,
+            "signals": result.total_count,
+            "duration_ms": result.duration_ms,
+            "method": result.method,
+        },
+        "density": density,
+        "signals_by_type": {k: len(v) for k, v in result.by_type().items()},
+    }
+
+
+def _build_mesh_topology_impl(self, min_quality=0.3):
+    topology = self.enable_auto_topology()
+    build_info = topology.build_from_scanner(min_quality=min_quality)
+    if not build_info.get("success"):
+        return {"build": build_info}
+    analysis = topology.analyze()
+    return {
+        "build": build_info,
+        "analysis": analysis,
+        "stats": topology.get_stats(),
+    }
+
+
+def _send_ambient_masked_impl(self, receiver, payload, learn_traffic=True):
+    masker = self.enable_ambient_masking()
+    data = self._prepare_payload(payload)
+    encrypted = self.crypto.encrypt(data)
+    packet = create_packet(
+        sender=self.node_id, receiver=receiver,
+        payload=encrypted, protocol="auto", priority=8)
+    packet._is_encrypted = True
+    packet.sign(self.crypto.get_signing_keypair().private_key)
+    if learn_traffic:
+        masker.observe(
+            size=len(encrypted),
+            protocol=packet.protocol,
+            entropy=self._estimate_entropy(encrypted))
+    target = self._resolve_target(receiver)
+    result = self.transport.send(
+        data=packet.to_bytes(), protocol="HTTP", target=target)
+    success = result.success
+    if success:
+        self.mycelium.record_success(receiver, receiver, "ambient")
+    return success, packet
+
+
+def _estimate_environment_density_impl(self, density_per_km2=None):
+    scanner = self.enable_rf_scanning()
+    density_info = scanner.estimate_rf_density()
+    if density_per_km2 is None:
+        density_per_km2 = density_info.get("total_density", 100.0)
+    model = self.enable_spatial_model(
+        density_per_km2=density_per_km2,
+        detection_range_km=0.1)
+    return model.analyze(area_km2=1.0)
+
+
+def _get_aggregated_stats_impl(self):
+    from .core.stats_aggregator import StatsAggregator
+    if not hasattr(self, '_stats_aggregator') or self._stats_aggregator is None:
+        self._stats_aggregator = StatsAggregator()
+    agg = self._stats_aggregator
+    agg.register("transport", self.transport)
+    if hasattr(self, '_masking_engine') and self._masking_engine:
+        agg.register("masking", self._masking_engine)
+    if hasattr(self, '_rf_scanner') and self._rf_scanner:
+        agg.register("rf_scanner", self._rf_scanner)
+    if hasattr(self, '_auto_topology') and self._auto_topology:
+        agg.register("topology", self._auto_topology)
+    if hasattr(self, '_ambient_masker') and self._ambient_masker:
+        agg.register("ambient", self._ambient_masker)
+    agg.register("mycelium", self.mycelium)
+    agg.register("evolution", self.evolution)
+    agg.register("selector", self.selector)
+    return agg.get_all()
+
+
+def _get_summary_stats_impl(self):
+    return self._get_aggregated_stats_impl()["summary"]
+
+
+def _export_full_stats_impl(self):
+    agg = self._stats_aggregator
+    return agg.export_json()
+
+
+InevioNet.enable_rf_scanning = _enable_rf_scanning_impl
+InevioNet.enable_auto_topology = _enable_auto_topology_impl
+InevioNet.enable_ambient_masking = _enable_ambient_masking_impl
+InevioNet.enable_spatial_model = _enable_spatial_model_impl
+InevioNet.scan_environment = _scan_environment_impl
+InevioNet.build_mesh_topology = _build_mesh_topology_impl
+InevioNet.send_ambient_masked = _send_ambient_masked_impl
+InevioNet.estimate_environment_density = _estimate_environment_density_impl
+InevioNet.get_aggregated_stats = _get_aggregated_stats_impl
+InevioNet.get_summary_stats = _get_summary_stats_impl
+InevioNet.export_full_stats = _export_full_stats_impl
+
+
+# ================================================================
+# IDENTITY + TRUST
+# ================================================================
+
+def _get_identity_info(self):
+    if not hasattr(self, "_identity") or self._identity is None:
+        return {
+            "device_id": self.node_id,
+            "device_type": "unknown", "role": "peer",
+            "nickname": self.node_id,
+            "registry_stats": {"total_devices": 0},
+            "trust_stats": {"total_records": 0},
+            "presence_stats": {"total": 0},
+        }
+    return {
+        "device_id": self._identity.device_id.device_id,
+        "device_type": self._identity.device_id.device_type.value,
+        "role": self._identity.device_id.role.value,
+        "nickname": self._identity.device_id.nickname,
+        "registry_stats": self._registry.get_stats() if hasattr(self, "_registry") else {},
+        "trust_stats": self._trust.get_stats() if hasattr(self, "_trust") else {},
+        "presence_stats": self._presence.get_stats() if hasattr(self, "_presence") else {},
+    }
+
+
+def _enable_identity(self, device_type="endpoint", nickname=None):
+    return self._ensure_identity()
+
+
+def _record_interaction(self, device_id, success):
+    if not hasattr(self, "_trust") or self._trust is None:
+        self._ensure_identity()
+    self._trust.record_interaction(
+        self._identity.device_id.device_id, device_id, success)
+
+
+def _get_trust(self, device_id):
+    if not hasattr(self, "_trust") or self._trust is None:
+        self._ensure_identity()
+    return self._trust.get_trust(
+        self._identity.device_id.device_id, device_id)
+
+
+InevioNet.get_identity_info = _get_identity_info
+InevioNet.enable_identity = _enable_identity
+InevioNet.record_interaction = _record_interaction
+InevioNet.get_trust = _get_trust
+
+
+# ================================================================
+# get_discovered_nodes
+# ================================================================
+def get_discovered_nodes(self):
+    import time as _t
+    nodes = {}
+    nodes[self.node_id] = {
+        'node_id': self.node_id, 'name': 'self', 'type': 'self',
+        'ip': '127.0.0.1', 'port': 8800, 'trust': 100.0,
+        'packets': self.stats.get('packets_sent', 0) if hasattr(self, 'stats') else 0,
+        'online': True, 'rssi': -30, 'method': 'local', 'last_seen': _t.time(),
+    }
+    if hasattr(self, '_rf_scanner') and self._rf_scanner:
+        try:
+            scan = self._rf_scanner.scan_all()
+            for sig in scan.get('signals', []):
+                sig_id = sig.get('identifier', sig.get('ssid', sig.get('mac', '')))
+                if not sig_id: continue
+                nodes[f"rf_{sig_id}"] = {
+                    'node_id': f"rf_{sig_id}",
+                    'name': sig.get('ssid', sig.get('name', sig_id)),
+                    'type': sig.get('type', 'unknown'),
+                    'ip': 'unknown', 'port': 0,
+                    'trust': min(100, max(10, 50 + sig.get('rssi_dbm', -80))),
+                    'packets': 0, 'online': True,
+                    'rssi': sig.get('rssi_dbm', -90),
+                    'method': 'rf_scan', 'last_seen': _t.time(),
+                }
+        except Exception:
+            pass
+    try:
+        for peer in self.get_discovered_peers():
+            pid = peer.get('device_id', '')
+            if pid and pid != self.node_id:
+                nodes[pid] = {
+                    'node_id': pid,
+                    'name': peer.get('nickname') or pid[:12],
+                    'type': 'peer',
+                    'ip': (peer.get('endpoint') or '').split(':')[0] or 'unknown',
+                    'port': 9555, 'trust': 60.0, 'packets': 0,
+                    'online': True, 'rssi': -60,
+                    'method': 'discovery',
+                    'last_seen': peer.get('timestamp', _t.time()),
+                }
+    except Exception:
+        pass
+    try:
+        from inevionet.users import get_user_manager
+        um = get_user_manager()
+        for contact in um.get_contacts():
+            cid = contact.get('node_id', '')
+            if cid and cid not in nodes:
+                nodes[cid] = {
+                    'node_id': cid,
+                    'name': contact.get('username', 'contact'),
+                    'type': 'contact',
+                    'ip': contact.get('ip', 'unknown'),
+                    'port': contact.get('port', 0),
+                    'trust': contact.get('trust', 50.0),
+                    'packets': contact.get('packets', 0),
+                    'online': False, 'rssi': -70,
+                    'method': 'contact',
+                    'last_seen': contact.get('added_at', _t.time()),
+                }
+    except Exception:
+        pass
+    # P12-Fix-6: в __init__ создаётся self.mycelium, а не _mycelium
+    if hasattr(self, 'mycelium') and self.mycelium:
+        try:
+            spores = self.mycelium.get_spores()
+            for i, spore in enumerate(spores[:10]):
+                spore_id = f"spore_{spore.get('target_network', 'unknown')}_{i}"
+                nodes[spore_id] = {
+                    'node_id': spore_id,
+                    'name': f"Spore:{spore.get('target_network', '?')}",
+                    'type': 'spore', 'ip': 'spore', 'port': 0,
+                    'trust': 30.0,
+                    'packets': spore.get('cached_packets', 0),
+                    'online': True, 'rssi': -80,
+                    'method': 'mycelium', 'last_seen': _t.time(),
+                }
+        except Exception:
+            pass
+    return nodes
+
+
+def _scan_industrial_impl(self, target, timeout=3.0):
+    """P13: РЎРѓР С”Р В°Р Р…Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р С‘Р Вµ Р С—РЎР‚Р С•Р СРЎвЂ№РЎв‚¬Р В»Р ВµР Р…Р Р…РЎвЂ№РЎвЂ¦ Р С—РЎР‚Р С•РЎвЂљР С•Р С”Р С•Р В»Р С•Р Р†."""
+    results = {}
+    host = target.split(":")[0]
+
+    # Modbus
+    try:
+        from .industrial.modbus import ModbusTCP
+        mb = ModbusTCP(target_host=host, target_port=502, timeout=timeout)
+        regs = mb.read_holding_registers(slave=1, address=0, count=4)
+        results["modbus"] = {
+            "found": bool(regs),
+            "registers": regs or [],
+        }
+    except Exception as e:
+        results["modbus"] = {"found": False, "error": str(e)}
+
+    # MQTT
+    try:
+        from .industrial.mqtt import MQTTClient, PAHO_AVAILABLE
+        if PAHO_AVAILABLE:
+            mc = MQTTClient(target_host=host, target_port=1883, timeout=timeout)
+            ok = mc.connect()
+            mc.disconnect()
+            results["mqtt"] = {"found": ok}
+        else:
+            results["mqtt"] = {"found": False, "error": "paho-mqtt not installed"}
+    except Exception as e:
+        results["mqtt"] = {"found": False, "error": str(e)}
+
+    # OPC-UA
+    try:
+        from .industrial.opcua import OPCUA
+        oc = OPCUA(endpoint=f"opc.tcp://{host}:4840", timeout=timeout)
+        results["opcua"] = {"found": True, "note": "packet built"}
+    except Exception as e:
+        results["opcua"] = {"found": False, "error": str(e)}
+
+    # DNP3
+    try:
+        from .industrial.dnp3 import DNP3
+        d = DNP3(target_host=host, target_port=20000, timeout=timeout)
+        pkt = d.wrap_for_inevionet(0x01, destination=1, address=0, count=1)
+        results["dnp3"] = {"found": bool(pkt), "packet_size": len(pkt.data)}
+        d.close()
+    except Exception as e:
+        results["dnp3"] = {"found": False, "error": str(e)}
+
+    return results
+
+
+InevioNet.scan_industrial = _scan_industrial_impl
+InevioNet.get_discovered_nodes = get_discovered_nodes

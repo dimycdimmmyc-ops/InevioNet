@@ -1050,6 +1050,88 @@ def serve_qr(filename):
 
 
 # --- P2P ---
+@app.route('/api/p2/send', methods=['POST'])
+def api_p2_send():
+    """P119: отправка через dead_drop (paste.rs) + fallback HTTPS."""
+    d = request.get_json(silent=True) or {}
+    receiver = (d.get('receiver') or '').strip()
+    message = d.get('message', '')
+    if not receiver or not message:
+        return jsonify({'success': False, 'error': 'empty'}), 400
+
+    n = get_net()
+    via = None
+    packet_id = None
+
+    # P119: 1. dead_drop (работает через NAT)
+    try:
+        if getattr(n, "dead_drop", None):
+            import json as _j
+            payload = _j.dumps({
+                "type": "p2_message",
+                "sender": n.node_id,
+                "receiver": receiver,
+                "message": message,
+                "ts": time.time(),
+            }, ensure_ascii=False)
+            url = n.dead_drop.publish_now("broadcast", payload)
+            if url:
+                via = "dead_drop:" + url[:40]
+                log.info("[P2P] sent via dead_drop: %s -> %s", n.node_id, receiver)
+    except Exception as e:
+        log.warning("[P2P] dead_drop failed: %s", e)
+
+    # P119: 2. Fallback HTTPS
+    if not via:
+        try:
+            target_host = None
+            target_port = 8080
+            for h in n.trusted_hosts.list_all():
+                label = h.get('label', '') or ''
+                host = h.get('host', '') or ''
+                if label == receiver or host == receiver:
+                    if ':' in host:
+                        target_host, port_s = host.rsplit(':', 1)
+                        target_port = int(port_s)
+                    else:
+                        target_host = host
+                    break
+            if target_host:
+                payload = json.dumps({
+                    'sender': n.node_id, 'message': message,
+                    'ts': time.time(), 'secure': True,
+                }).encode('utf-8')
+                ctx = _ssl._create_unverified_context()
+                for scheme in ('https', 'http'):
+                    try:
+                        url = '%s://%s:%s/api/p2/inbox' % (scheme, target_host, target_port)
+                        req = _urlreq.Request(url, data=payload,
+                                              headers={'Content-Type': 'application/json'})
+                        _urlreq.urlopen(req, timeout=5, context=ctx)
+                        via = scheme + ":" + target_host
+                        break
+                    except Exception:
+                        continue
+        except Exception as e:
+            log.debug("[P2P] HTTPS: %s", e)
+
+    # P119: 3. Fallback n.send
+    if not via:
+        try:
+            packet = n.send(receiver, message)
+            if packet:
+                packet_id = getattr(packet, 'packet_id', None)
+                via = "cascade"
+        except Exception:
+            pass
+
+    return jsonify({
+        'success': bool(via),
+        'via': via,
+        'packet_id': packet_id,
+    })
+
+
 @app.route('/api/p2/inbox', methods=['GET'])
 def api_p2_inbox_get():
     return jsonify({'success': True, 'messages': list(get_inbox())})
@@ -1074,88 +1156,7 @@ def api_p2_inbox_post():
     return jsonify({'success': True})
 
 
-@app.route('/api/p2/send', methods=['POST'])
-def api_p2_send():
-    d = request.json or {}
-    receiver = (d.get('receiver') or '').strip()
-    message = d.get('message', '')
-    if not receiver or not message:
-        return jsonify({'success': False, 'error': 'empty'}), 400
 
-    n = get_net()
-    nodes = snapshot()
-
-    # P46: first lookup in trusted_hosts (by label=node_id or host)
-    target_host = None
-    target_port = 8080
-    try:
-        for h in n.trusted_hosts.list_all():
-            label = h.get('label', '') or ''
-            host = h.get('host', '') or ''
-            if (label == receiver or host == receiver
-                    or (label and label.startswith(receiver))
-                    or (host and host.startswith(receiver))):
-                if ':' in host:
-                    parts = host.split(':')
-                    target_host = parts[0]
-                    try:
-                        target_port = int(parts[1])
-                    except Exception:
-                        target_port = 8080
-                else:
-                    target_host = host
-                    target_port = 8080
-                log.info('[P2P] trusted match: %s -> %s:%d',
-                         receiver, target_host, target_port)
-                break
-    except Exception as _te:
-        log.debug('[P2P] trusted lookup: %s', _te)
-
-    # Fallback: search in snapshot
-    target = None
-    if not target_host:
-        for nid, nd in nodes.items():
-            if nid == receiver or nd.get('name') == receiver or nid.startswith(receiver):
-                target = nd
-                break
-        if target and target.get('ip') and target['ip'] not in ('127.0.0.1', 'unknown'):
-            target_host = target['ip']
-            target_port = target.get('port', 8080)
-
-    delivered_via = None
-    if target_host:
-        payload = json.dumps({
-            'sender': n.node_id,
-            'message': message,
-            'ts': time.time(),
-            'secure': True,
-        }).encode('utf-8')
-        ctx = _ssl._create_unverified_context()
-        for scheme in ('https', 'http'):
-            url = '%s://%s:%s/api/p2/inbox' % (scheme, target_host, target_port)
-            try:
-                req = _urlreq.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-                _urlreq.urlopen(req, timeout=5, context=ctx)
-                delivered_via = url
-                log.info('[P2] доставлено %s через %s', receiver, scheme)
-                break
-            except Exception:
-                continue
-
-    packet = None
-    try:
-        packet = n.send(receiver, message)
-    except Exception:
-        pass
-
-    return jsonify({
-        'success': bool(delivered_via) or (packet is not None),
-        'via': delivered_via,
-        'packet_id': packet.packet_id if packet else None,
-    })
-
-
-# --- PROBE / RF ---
 @app.route('/api/probe', methods=['POST'])
 def api_probe():
     d = request.json or {}
@@ -2488,6 +2489,20 @@ def api_organism():
         if org is None:
             return jsonify({'success': False, 'error': 'organism not running',
                             'hint': 'check INEVIO_ORGANISM env'})
+        # P100c: все узлы + self
+        all_nodes = dict(org.memory.get("nodes", {}))
+        # Добавить self
+        all_nodes["127.0.0.1"] = {
+            "ip": "127.0.0.1",
+            "type": "self",
+            "source": "local",
+            "depth": 0,
+            "nlp_plan": "self",
+            "nlp_confidence": 1.0,
+        }
+        # Сортировка по depth
+        sorted_nodes = sorted(all_nodes.items(),
+                              key=lambda x: (x[1].get("depth", 99), x[0]))
         return jsonify({
             'success': True,
             'stats': org.get_stats(),
@@ -2499,7 +2514,9 @@ def api_organism():
                 'routes_count': len(org.memory.get("routes", [])),
                 'depth_count': len(org.memory.get("depth", {})),
             },
-            'nodes_sample': list(org.memory.get("nodes", {}).items())[:10],
+            'nodes': sorted_nodes,
+            'nodes_sample': sorted_nodes[:10],
+            'nodes_count': len(sorted_nodes),
         })
     except Exception as e:
         log.error('[P95b] organism: %s', e)
@@ -2657,6 +2674,358 @@ def api_nlp_stages():
             "priority": STAGE_PRIORITY,
         })
     except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/dht/my_info')
+def api_dht_my_info():
+    """P103: полная информация о себе (для копирования)."""
+    try:
+        n = get_net()
+        # Serial
+        from inevionet.core.serial import get_current_serial
+        serial = get_current_serial()
+        # Public addr
+        addr = getattr(n, "public_addr", None)
+        pub_ip = addr[0] if addr else ""
+        pub_port = addr[1] if addr else 0
+        # DeadDrop URL
+        dd_url = ""
+        if getattr(n, "dead_drop", None):
+            dd_url = n.dead_drop.my_url or ""
+        # Relay count
+        relay_count = 0
+        if hasattr(n, "organism") and n.organism:
+            relay_count = n.organism.stats.get("nodes_relayed", 0)
+        # Nodes count
+        nodes_count = 0
+        if hasattr(n, "organism") and n.organism:
+            nodes_count = len(n.organism.memory.get("nodes", {}))
+        info = {
+            "node_id": n.node_id,
+            "serial": serial,
+            "public_ip": pub_ip,
+            "public_port": pub_port,
+            "nat_type": getattr(n, "nat_type", "unknown"),
+            "dead_drop_url": dd_url,
+            "relay_count": relay_count,
+            "nodes_count": nodes_count,
+        }
+        return jsonify({"success": True, "info": info, "json": json.dumps(info, ensure_ascii=False)})
+    except Exception as e:
+        log.error("[DHT] my_info: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/dht/bootstrap', methods=['POST'])
+def api_dht_bootstrap():
+    """P116e: добавить peer + зарегистрировать в dead_drop + publish map."""
+    try:
+        n = get_net()
+        d = request.get_json(silent=True) or {}
+        peer_json = d.get("json", "")
+        peer_dict = d.get("peer", {})
+        
+        log.info("[P116e] bootstrap START: json_len=%d, dict=%s",
+                 len(peer_json) if peer_json else 0,
+                 bool(peer_dict))
+        
+        if not getattr(n, "dht_bootstrap", None):
+            return jsonify({"success": False, "error": "no_dht"})
+        
+        added = False
+        parsed = {}
+        
+        if peer_json:
+            # Парсим строку JSON
+            try:
+                if isinstance(peer_json, str):
+                    parsed = json.loads(peer_json)
+                elif isinstance(peer_json, dict):
+                    parsed = peer_json
+            except Exception as _je:
+                log.warning("[P116e] json parse fail: %s", _je)
+                parsed = {}
+            added = n.dht_bootstrap.add_peer_json(peer_json) if isinstance(peer_json, str) else False
+        elif peer_dict:
+            parsed = peer_dict
+            added = n.dht_bootstrap.add_peer_dict(peer_dict)
+        
+        log.info("[P116e] parsed keys: %s", list(parsed.keys()) if parsed else [])
+        
+        if parsed:
+            node_id = parsed.get("node_id", "")
+            dd_url = parsed.get("dead_drop_url", "")
+            log.info("[P116e] node=%s dd_url=%s", node_id, dd_url[:60] if dd_url else "EMPTY")
+            
+            # Регистрируем в dead_drop
+            _dd = getattr(n, "dead_drop", None)
+            if _dd is None:
+                log.error("[P116e] dead_drop is NONE")
+            elif not hasattr(_dd, "register_peer"):
+                log.error("[P116e] no register_peer method")
+            elif node_id and dd_url:
+                try:
+                    _before = len(getattr(_dd, "peer_urls", {}))
+                    _dd.register_peer(node_id, dd_url)
+                    _after = len(getattr(_dd, "peer_urls", {}))
+                    log.info("[P116e] registered: peers %d -> %d", _before, _after)
+                except Exception as _re:
+                    import traceback
+                    log.error("[P116e] register fail: %s\n%s", _re, traceback.format_exc())
+            else:
+                log.warning("[P116e] node_id=%s dd_url=%s — SKIP", node_id, dd_url)
+            
+            # P116c: publish map
+            if getattr(n, "organism", None):
+                try:
+                    n.organism._publish_map_to_dead_drop()
+                    log.info("[P116e] map published")
+                except Exception as _pe:
+                    log.debug("[P116e] publish: %s", _pe)
+            
+            # trusted_hosts
+            pub_ip = parsed.get("public_ip", "")
+            pub_port = parsed.get("public_port", 0)
+            if node_id and pub_ip and pub_port:
+                try:
+                    n.trusted_hosts.add("%s:%d" % (pub_ip, int(pub_port)),
+                                        label=node_id, method="dht")
+                except Exception:
+                    pass
+        
+        # Debug-ответ
+        _dd_peers = 0
+        if getattr(n, "dead_drop", None):
+            _dd_peers = len(getattr(n.dead_drop, "peer_urls", {}))
+        
+        return jsonify({
+            "success": True,
+            "added": added,
+            "peers": n.dht_bootstrap.get_peers_count(),
+            "deaddrop_peers": _dd_peers,
+        })
+    except Exception as e:
+        import traceback
+        log.error("[P116e] outer: %s\n%s", e, traceback.format_exc())
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/dht/peers')
+def api_dht_peers():
+    """P103: список DHT peers."""
+    try:
+        n = get_net()
+        if not getattr(n, "dht_bootstrap", None):
+            return jsonify({"success": True, "peers": [], "count": 0})
+        return jsonify({
+            "success": True,
+            "peers": n.dht_bootstrap.get_peers(),
+            "count": n.dht_bootstrap.get_peers_count(),
+            "stats": n.dht_bootstrap.get_stats(),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/dht/find/<serial>')
+def api_dht_find(serial):
+    """P103: найти peers по serial."""
+    try:
+        n = get_net()
+        if not getattr(n, "dht_bootstrap", None):
+            return jsonify({"success": False, "error": "no_dht"})
+        found = n.dht_bootstrap.find_by_serial(serial)
+        return jsonify({
+            "success": True,
+            "serial": serial,
+            "found": [p.to_dict() for p in found],
+            "count": len(found),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/trust/qr', methods=['POST'])
+def api_trust_qr():
+    """P111: добавить доверенного через QR-JSON."""
+    try:
+        n = get_net()
+        d = request.get_json(silent=True) or {}
+        # Ожидаем: {node_id, serial, public_ip, public_port, dead_drop_url}
+        peer = d.get("peer", {}) or d
+        node_id = peer.get("node_id", "")
+        if not node_id:
+            return jsonify({"success": False, "error": "no_node_id"}), 400
+        
+        added = False
+        # 1. Добавить в trusted_hosts
+        host = ""
+        if peer.get("public_ip") and peer.get("public_port"):
+            host = "%s:%d" % (peer["public_ip"], int(peer["public_port"]))
+        if host:
+            try:
+                added = n.trusted_hosts.add(host, label=node_id, method="qr")
+            except Exception:
+                pass
+        # 2. Добавить в DHT
+        if getattr(n, "dht_bootstrap", None):
+            try:
+                n.dht_bootstrap.add_peer_dict(peer)
+            except Exception:
+                pass
+        # 3. Регистрируем в dead_drop (если есть URL)
+        if peer.get("dead_drop_url") and getattr(n, "dead_drop", None):
+            try:
+                n.dead_drop.register_peer(node_id, peer["dead_drop_url"])
+            except Exception:
+                pass
+        # 4. Audit
+        try:
+            if getattr(n, "audit", None):
+                n.audit.add_event("trust_qr", {
+                    "node_id": node_id,
+                    "host": host,
+                    "added": added,
+                })
+        except Exception:
+            pass
+        
+        return jsonify({
+            "success": True,
+            "added": added,
+            "node_id": node_id,
+            "host": host,
+        })
+    except Exception as e:
+        log.error("[TrustQR] %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/trust/list')
+def api_trust_list():
+    """P111: список доверенных."""
+    try:
+        n = get_net()
+        hosts = n.trusted_hosts.list_all()
+        return jsonify({"success": True, "hosts": hosts, "count": len(hosts)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/dht/merge', methods=['POST'])
+def api_dht_merge():
+    """P112: принять чужую карту от DHT-peer."""
+    try:
+        n = get_net()
+        d = request.get_json(silent=True) or {}
+        sender = d.get("node_id", "")
+        if not sender or sender == n.node_id:
+            return jsonify({"success": False, "error": "same_node"}), 400
+        nodes_in = d.get("nodes", []) or []
+        added = 0
+        for item in nodes_in:
+            if not isinstance(item, dict):
+                continue
+            ip = item.get("ip", "")
+            if not ip:
+                continue
+            # Merge через organism
+            if getattr(n, "organism", None):
+                org = n.organism
+                with org._lock:
+                    if ip in org.memory["nodes"]:
+                        continue
+                    node = dict(item)
+                    node["via_dht_peer"] = sender
+                    node["source"] = "merge_dht:" + str(node.get("source", "?"))
+                    node["depth"] = int(node.get("depth", 1)) + 1
+                    org.memory["nodes"][ip] = node
+                    added += 1
+        # Merge relayed/taught
+        if getattr(n, "organism", None):
+            org = n.organism
+            for r in d.get("relayed", []) or []:
+                org.memory.setdefault("relayed_ips", set()).add(r)
+            for t in d.get("taught", []) or []:
+                org.memory.setdefault("taught", set()).add(t)
+            with org._lock:
+                org.stats["maps_merged"] = org.stats.get("maps_merged", 0) + 1
+                org.stats["nodes_from_merge"] = org.stats.get("nodes_from_merge", 0) + added
+        # Audit
+        try:
+            if getattr(n, "audit", None):
+                n.audit.add_event("dht_merge", {
+                    "sender": sender,
+                    "added": added,
+                })
+        except Exception:
+            pass
+        return jsonify({
+            "success": True,
+            "sender": sender,
+            "added": added,
+        })
+    except Exception as e:
+        log.error("[DHT] merge: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/trust/qr_image')
+def api_trust_qr_image():
+    """P114: QR-код с моим JSON (для сканирования)."""
+    try:
+        n = get_net()
+        # Собираем JSON
+        from inevionet.core.serial import get_current_serial
+        serial = get_current_serial()
+        addr = getattr(n, "public_addr", None)
+        pub_ip = addr[0] if addr else ""
+        pub_port = addr[1] if addr else 0
+        dd_url = ""
+        if getattr(n, "dead_drop", None):
+            dd_url = n.dead_drop.my_url or ""
+        relay_count = 0
+        nodes_count = 0
+        if hasattr(n, "organism") and n.organism:
+            relay_count = n.organism.stats.get("nodes_relayed", 0)
+            nodes_count = len(n.organism.memory.get("nodes", {}))
+        info = {
+            "node_id": n.node_id,
+            "serial": serial,
+            "public_ip": pub_ip,
+            "public_port": pub_port,
+            "nat_type": getattr(n, "nat_type", "unknown"),
+            "dead_drop_url": dd_url,
+            "relay_count": relay_count,
+            "nodes_count": nodes_count,
+        }
+        # Генерируем QR через qrcode (если есть)
+        try:
+            import qrcode
+            import io
+            import base64
+            qr = qrcode.QRCode(version=None, box_size=8, border=2)
+            qr.add_data(json.dumps(info, ensure_ascii=False))
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            return jsonify({
+                "success": True,
+                "qr_base64": "data:image/png;base64," + b64,
+                "info": info,
+            })
+        except ImportError:
+            return jsonify({
+                "success": False,
+                "error": "qrcode_not_installed",
+                "info": info,
+                "hint": "pip install qrcode[pil]",
+            })
+    except Exception as e:
+        log.error("[QR] image: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

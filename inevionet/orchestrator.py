@@ -245,11 +245,44 @@ class InevioNet:
             logger.info('[Relay] topology loop started')
         except Exception as _e:
             logger.debug('[Relay] topology hook error: %s', _e)
+        # P103: Serial
+        try:
+            from .core.serial import get_current_serial
+            self.serial = get_current_serial()
+            logger.info("[P103] serial: %s", self.serial)
+        except Exception as _se:
+            self.serial = ""
+            logger.debug("[P103] serial: %s", _se)
+
+        # P103: DHT Bootstrap
+        self.dht_bootstrap = None
+        try:
+            from .dht.bootstrap import DHTBootstrap
+            self.dht_bootstrap = DHTBootstrap(
+                node_id=self.node_id,
+                serial=self.serial,
+            )
+            logger.info("[P103] DHTBootstrap created (serial=%s)", self.serial)
+        except Exception as _de:
+            logger.debug("[P103] dht: %s", _de)
+
+        # P103: DHT Bootstrap
+        if getattr(self, "dht_bootstrap", None):
+            try:
+                self.dht_bootstrap.start()
+                logger.info("[P103] DHTBootstrap started (serial=%s)", self.serial)
+            except Exception as _de:
+                logger.debug("[P103] dht start: %s", _de)
+
         # P91: DeadDrop
         self.dead_drop = None
         try:
             from .network.dead_drop import DeadDrop
-            self.dead_drop = DeadDrop(node_id=self.node_id, poll_interval=60)
+            self.dead_drop = DeadDrop(
+                node_id=self.node_id,
+                poll_interval=60,
+                serial=getattr(self, "serial", ""),
+            )
             logger.info("[P91] dead_drop created")
         except Exception as _e:
             logger.debug("[P91] dead_drop: %s", _e)

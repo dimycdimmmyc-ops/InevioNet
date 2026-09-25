@@ -2,1143 +2,1515 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>InevioNet</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>InevioNet - Живая сеть</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
-:root {
-  --bg-1:#0a0e27; --bg-2:#000428;
-  --glass:rgba(28,28,30,0.78);
-  --glass-2:rgba(44,44,46,0.72);
-  --blue:#0a84ff; --green:#30d158; --red:#ff453a;
-  --yellow:#ffd60a; --pink:#ff375f; --orange:#ff9f0a;
-  --text:#fff; --dim:rgba(235,235,245,0.6);
-  --separator:rgba(84,84,88,0.65);
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0d14;--panel:#11151c;--panel-2:#161b24;--border:#1f2632;
+  --text:#e6edf3;--dim:#8b949e;--accent:#58a6ff;
+  --self:#58a6ff;--lan:#3fb950;--router:#d29922;--isp:#a371f7;
+  --inev:#f0883e;--spore:#f85149;--service:#79c0ff;--wifi:#39c5cf;
+  --success:#3fb950;--warn:#d29922;--error:#f85149;
+  --radius:10px;--mono:'JetBrains Mono','SF Mono',Consolas,monospace;
 }
-body {
-  background:radial-gradient(ellipse at center,var(--bg-1) 0%,var(--bg-2) 55%,#000 100%);
-  color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",system-ui,sans-serif;
-  overflow:hidden; height:100vh;
-  -webkit-font-smoothing:antialiased;
-}
-#starry-sky { position:fixed; inset:0; z-index:1; cursor:grab; }
-#starry-sky:active { cursor:grabbing; }
-
-/* SIDEBAR */
-.sidebar {
-  position:fixed; left:0; top:0;
-  width:400px; max-width:100vw; height:100vh;
-  background:var(--glass);
-  backdrop-filter:blur(40px) saturate(180%);
-  -webkit-backdrop-filter:blur(40px) saturate(180%);
-  border-right:1px solid var(--separator);
-  overflow-y:auto; z-index:100; padding:16px;
-  transition:transform 0.4s cubic-bezier(0.32,0.72,0,1);
-}
-.sidebar::-webkit-scrollbar { width:4px; }
-.sidebar::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:2px; }
-
-/* HEADER */
-.app-header { text-align:center; padding:8px 0 16px; border-bottom:0.5px solid var(--separator); margin-bottom:14px; }
-.app-title {
-  font-size:1.8em; font-weight:700;
-  background:linear-gradient(135deg,#64d2ff,#0a84ff,#bf5af2);
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-  letter-spacing:-0.5px;
-}
-.app-subtitle { color:var(--dim); font-size:0.75em; margin-top:2px; }
-.status-bar {
-  display:flex; align-items:center; justify-content:center;
-  gap:8px; margin-top:10px; font-size:0.85em; color:var(--dim);
-}
-.dot { width:10px; height:10px; border-radius:50%; background:var(--red); transition:all 0.3s; }
-.dot.on { background:var(--green); box-shadow:0 0 10px var(--green); }
-.public-addr {
-  display:flex; align-items:center; justify-content:center;
-  gap:6px; margin-top:8px; padding:6px 10px;
-  background:rgba(10,132,255,0.12);
-  border-radius:8px; font-size:0.78em;
-  color:var(--dim);
-  border:0.5px solid rgba(10,132,255,0.3);
-}
-.public-addr .addr { color:var(--blue); font-weight:600; font-family:monospace; }
-.public-addr .nat-cone { color:var(--green); }
-.public-addr .nat-sym { color:var(--orange); }
-
-/* METRICS BAR — только чтение */
-.metrics-bar {
-  display:grid; grid-template-columns:repeat(3, 1fr);
-  gap:8px; margin-top:12px;
-  font-size:0.72em; color:var(--dim);
-}
-.metric {
-  background:rgba(120,120,128,0.14);
-  border-radius:10px; padding:8px 6px; text-align:center;
-  border:0.5px solid var(--separator);
-}
-.metric-value {
-  display:block; font-size:1.4em; font-weight:700;
-  color:var(--text); margin-top:2px;
-}
-.metric-value.green { color:var(--green); }
-.metric-value.blue { color:var(--blue); }
-.metric-value.pink { color:var(--pink); }
-
-/* CARD */
-.card {
-  background:var(--glass-2);
-  backdrop-filter:blur(30px) saturate(180%);
-  -webkit-backdrop-filter:blur(30px) saturate(180%);
-  border-radius:16px; padding:14px; margin-bottom:12px;
-  border:0.5px solid var(--separator);
-}
-.card-title {
-  font-size:1em; font-weight:600; margin-bottom:10px;
-  display:flex; align-items:center; gap:8px; color:var(--text);
-}
-.card-title .emoji { font-size:1.2em; }
-
-/* BUTTONS */
-.btn {
-  width:100%; padding:12px 14px;
-  border:none; border-radius:12px;
-  font-size:0.95em; font-weight:600; font-family:inherit;
-  cursor:pointer; margin-bottom:6px;
-  transition:all 0.2s;
-  display:flex; align-items:center; justify-content:center; gap:6px;
-}
-.btn:active { transform:scale(0.97); opacity:0.85; }
-.btn-primary { background:linear-gradient(135deg,#0a84ff,#0066cc); color:#fff; }
-.btn-success { background:linear-gradient(135deg,#30d158,#28b04a); color:#fff; }
-.btn-glass { background:rgba(120,120,128,0.24); color:var(--text); border:0.5px solid var(--separator); }
-.btn-glass:hover { background:rgba(120,120,128,0.36); }
-.btn-sm { width:auto; padding:6px 12px; font-size:0.8em; border-radius:8px; margin-bottom:0; display:inline-flex; }
-
-/* FORMS */
-.form-group { margin-bottom:10px; }
-label { display:block; color:var(--dim); font-size:0.75em; font-weight:500; margin-bottom:4px; }
-input, textarea, select {
-  width:100%; padding:10px 12px;
-  background:rgba(120,120,128,0.16);
-  border:0.5px solid var(--separator);
-  border-radius:10px; color:var(--text);
-  font-family:inherit; font-size:0.95em;
-}
-input:focus, textarea:focus { outline:none; border-color:var(--blue); }
-
-/* USER BAR */
-.user-bar {
-  display:flex; justify-content:space-between; align-items:center;
-  background:rgba(10,132,255,0.12);
-  border:0.5px solid rgba(10,132,255,0.3);
-  padding:10px 14px; border-radius:12px; margin-bottom:12px;
-}
-.user-name { font-weight:600; font-size:0.95em; }
-.user-node { color:var(--dim); font-size:0.7em; font-family:monospace; }
-
-/* AUTH */
-.auth-screen {
-  position:fixed; inset:0;
-  background:rgba(0,0,0,0.85);
-  backdrop-filter:blur(20px);
-  z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;
-}
-.auth-card {
-  background:var(--glass); backdrop-filter:blur(40px) saturate(180%);
-  border:0.5px solid var(--separator); border-radius:24px; padding:28px 22px;
-  max-width:380px; width:100%;
-}
-.auth-tabs { display:flex; gap:6px; margin:14px 0; background:rgba(120,120,128,0.16); padding:4px; border-radius:10px; }
-.tab-btn {
-  flex:1; padding:9px; background:transparent; border:none;
-  color:var(--dim); cursor:pointer; border-radius:8px;
-  font-weight:600; font-size:0.9em;
-}
-.tab-btn.active { background:var(--blue); color:#fff; }
-
-/* LIST */
-.list { max-height:200px; overflow-y:auto; }
-.list-item {
-  background:rgba(120,120,128,0.14);
-  padding:10px 12px; border-radius:10px;
-  margin-bottom:6px; border:0.5px solid var(--separator);
-  display:flex; justify-content:space-between; align-items:center;
-  font-size:0.9em;
-}
-.list-item .del {
-  background:transparent; border:none; color:var(--red);
-  cursor:pointer; font-size:1.1em; padding:2px 6px;
-}
-.empty { color:var(--dim); text-align:center; padding:16px; font-style:italic; font-size:0.85em; }
-
-/* LOG */
-.log-container {
-  height:160px; background:rgba(0,0,0,0.5);
-  border:0.5px solid var(--separator); border-radius:10px; padding:8px;
-  overflow-y:auto; font-family:"SF Mono",Consolas,monospace;
-  font-size:0.72em; line-height:1.4;
-}
-.log-entry { padding:2px 5px; border-radius:4px; margin-bottom:1px; word-break:break-word; }
-.log-entry.info { color:#64d2ff; }
-.log-entry.success { color:var(--green); }
-.log-entry.error { color:var(--red); }
-.log-entry.warn { color:var(--yellow); }
-
-/* ADVANCED */
-.advanced-toggle {
-  cursor:pointer; user-select:none;
-  display:flex; justify-content:space-between; align-items:center;
-}
-.advanced-toggle .arrow { color:var(--dim); font-size:0.8em; }
-.advanced-content { margin-top:10px; display:none; }
-.advanced-content.open { display:block; }
-
-/* PANEL */
-.info-panel {
-  position:fixed; top:16px; right:16px;
-  width:300px; max-width:calc(100vw - 32px);
-  background:var(--glass); backdrop-filter:blur(40px) saturate(180%);
-  border:0.5px solid var(--separator); border-radius:18px; padding:14px;
-  z-index:50; max-height:calc(100vh - 32px); overflow-y:auto;
-  transition:transform 0.4s,opacity 0.3s;
-}
-.info-panel.hidden { transform:translateX(120%); opacity:0; }
-.stats-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
-.stat-card {
-  background:rgba(120,120,128,0.14); padding:12px 10px;
-  border-radius:10px; text-align:center; border:0.5px solid var(--separator);
-}
-.stat-label { display:block; color:var(--dim); font-size:0.7em; margin-bottom:4px; }
-.stat-value { display:block; font-size:1.4em; font-weight:700; }
-.stat-value.ok { color:var(--green); }
-.stat-value.err { color:var(--red); }
-.stat-value.my { color:var(--pink); }
-.stat-value.blue { color:var(--blue); }
-
-.panel-toggle, .mobile-menu {
-  position:fixed; width:42px; height:42px; border-radius:50%;
-  background:var(--glass); backdrop-filter:blur(20px);
-  border:0.5px solid var(--separator); color:var(--text); font-size:1.1em;
-  cursor:pointer; z-index:110; display:flex; align-items:center; justify-content:center;
-}
-.panel-toggle { top:16px; right:16px; z-index:60; }
-.mobile-menu { top:16px; left:16px; display:none; }
-.panel-toggle:active, .mobile-menu:active { transform:scale(0.9); }
-
-@media (max-width:768px) {
-  .sidebar { transform:translateX(-110%); width:100%; max-width:100vw; }
-  .sidebar.open { transform:translateX(0); }
-  .mobile-menu { display:flex; }
-  .info-panel { display:none; }
-  .panel-toggle { display:none; }
-}
-.sep { height:0.5px; background:var(--separator); margin:12px 0; }
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-columns:300px 1fr 380px;grid-template-rows:52px 1fr;height:100vh}
+@media(max-width:1500px){.app{grid-template-columns:280px 1fr 340px}}
+@media(max-width:1200px){.app{grid-template-columns:260px 1fr 320px}}
+@media(max-width:1000px){.app{grid-template-columns:1fr;grid-template-rows:52px 1fr}.left{display:none!important}.right{position:fixed;right:0;top:52px;bottom:0;width:380px;z-index:50}.right.hidden{display:none!important}}
+@media(max-width:640px){.app{grid-template-columns:1fr}.right{width:100%}}
+.header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border);z-index:10}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.3px}
+.brand .logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#58a6ff,#a371f7);display:flex;align-items:center;justify-content:center;font-size:14px}
+.brand .v{color:var(--dim);font-weight:400;font-size:11px;font-family:var(--mono)}
+.status{display:flex;align-items:center;gap:16px;font-size:12px;font-family:var(--mono);color:var(--dim);flex-wrap:wrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--error);transition:.2s}
+.dot.on{background:var(--success);box-shadow:0 0 8px var(--success)}
+.status .label{color:var(--dim)}
+.status .value{color:var(--text);font-weight:600}
+.left{background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;padding:14px}
+.section{margin-bottom:16px}
+.section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.section-title .count{background:var(--panel-2);padding:1px 6px;border-radius:6px;font-size:10px;color:var(--text);font-family:var(--mono)}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.metric{background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.metric .l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;font-weight:600}
+.metric .v{font-size:22px;font-weight:700;font-family:var(--mono);letter-spacing:-.5px;line-height:1}
+.metric.blue .v{color:var(--accent)}
+.metric.green .v{color:var(--success)}
+.metric.orange .v{color:var(--inev)}
+.metric.purple .v{color:var(--isp)}
+.metric.pink .v{color:var(--spore)}
+.node-list{max-height:280px;overflow-y:auto;margin:-4px}
+.node-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:.12s;border:1px solid transparent}
+.node-item:hover{background:var(--panel-2);border-color:var(--border)}
+.node-item.active{background:rgba(88,166,255,.1);border-color:var(--accent)}
+.node-item .badge{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.node-item .info{flex:1;min-width:0}
+.node-item .ip{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-item .type{font-size:10px;color:var(--dim);margin-top:1px}
+.node-item .plan{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 5px;border-radius:4px;font-family:var(--mono)}
+.plan-teach{background:rgba(63,185,80,.15);color:var(--success)}
+.plan-relay{background:rgba(88,166,255,.15);color:var(--accent)}
+.plan-capsule{background:rgba(210,153,34,.15);color:var(--warn)}
+.plan-route{background:rgba(139,148,158,.15);color:var(--dim)}
+.plan-skip{background:rgba(248,81,73,.15);color:var(--error)}
+.canvas-wrap{position:relative;background:radial-gradient(ellipse at center,#0d1219 0%,#0a0d14 70%);overflow:hidden}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+canvas:active{cursor:grabbing}
+.canvas-overlay{position:absolute;top:12px;left:12px;display:flex;gap:6px;z-index:5}
+.btn-icon{background:var(--panel);border:1px solid var(--border);border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dim);font-size:14px;transition:.15s}
+.btn-icon:hover{background:var(--panel-2);color:var(--text);border-color:var(--accent)}
+.legend{position:absolute;bottom:12px;left:12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:10px;display:flex;flex-direction:column;gap:4px;z-index:5}
+.legend-row{display:flex;align-items:center;gap:6px;color:var(--dim);font-family:var(--mono)}
+.legend-row .d{width:8px;height:8px;border-radius:50%}
+.right{background:var(--panel);border-left:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
+.tabs{display:flex;background:var(--panel-2);border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{flex:1;padding:10px 6px;text-align:center;cursor:pointer;font-size:11px;font-weight:600;color:var(--dim);border-bottom:2px solid transparent;transition:.15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab:hover{color:var(--text);background:rgba(88,166,255,.05)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab .badge{display:inline-block;background:var(--error);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;font-family:var(--mono)}
+.tab-content{flex:1;overflow-y:auto;padding:14px;display:none}
+.tab-content.active{display:block}
+.msg-list{display:flex;flex-direction:column;gap:8px}
+.msg-card{background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.msg-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11px}
+.msg-from{font-family:var(--mono);font-weight:700;color:var(--accent)}
+.msg-time{color:var(--dim);font-family:var(--mono);font-size:10px}
+.msg-text{font-size:12px;color:var(--text);word-break:break-word;line-height:1.5}
+.contact-card{display:flex;justify-content:space-between;align-items:center;background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:6px}
+.contact-info{flex:1;min-width:0}
+.contact-name{font-weight:600;font-size:12px;color:var(--text)}
+.contact-node{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{width:100%;padding:10px 14px;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--accent);color:#000}
+.btn-primary:hover{background:#79b8ff}
+.btn-success{background:var(--success);color:#000}
+.btn-success:hover{background:#4fc965}
+.btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--border)}
+.btn-sm{padding:6px 10px;font-size:11px;width:auto;margin-bottom:0}
+.btn-icon-sm{background:transparent;border:none;color:var(--error);cursor:pointer;font-size:16px;padding:4px 8px}
+.form-group{margin-bottom:10px}
+.form-label{display:block;font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.form-input,.form-textarea{width:100%;padding:9px 11px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:13px;transition:.15s}
+.form-input:focus,.form-textarea:focus{outline:none;border-color:var(--accent)}
+.form-textarea{resize:vertical;min-height:70px;font-family:var(--mono);font-size:12px}
+.detail-header{padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+.detail-ip{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text);word-break:break-all}
+.detail-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.tag{font-size:10px;padding:2px 7px;border-radius:5px;background:var(--panel-2);color:var(--dim);font-family:var(--mono);border:1px solid var(--border)}
+.tag.blue{color:var(--accent);border-color:rgba(88,166,255,.3);background:rgba(88,166,255,.1)}
+.tag.green{color:var(--success);border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.1)}
+.tag.orange{color:var(--inev);border-color:rgba(240,136,62,.3);background:rgba(240,136,62,.1)}
+.tag.purple{color:var(--isp);border-color:rgba(163,113,247,.3);background:rgba(163,113,247,.1)}
+.detail-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.detail-row:last-child{border-bottom:none}
+.detail-row .l{color:var(--dim)}
+.detail-row .v{font-family:var(--mono);color:var(--text);font-weight:600;text-align:right}
+.nlp-block{background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-top:10px}
+.nlp-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:10px}
+.nlp-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:6px}
+.nlp-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--isp));transition:width .4s}
+.nlp-plan{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:8px}
+.nlp-plan .name{font-family:var(--mono);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.5px}
+.nlp-plan .conf{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.phase-list{font-family:var(--mono);font-size:10px;line-height:1.7;color:var(--dim);max-height:160px;overflow-y:auto}
+.phase-item{padding:2px 0;border-bottom:1px solid rgba(31,38,50,.5)}
+.phase-item .ph{color:var(--accent);font-weight:600}
+.log{font-family:var(--mono);font-size:10px;line-height:1.6;max-height:140px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px}
+.log-entry{padding:2px 4px;border-radius:3px;word-break:break-all}
+.log-entry.info{color:var(--accent)}
+.log-entry.success{color:var(--success)}
+.log-entry.warn{color:var(--warn)}
+.log-entry.error{color:var(--error)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#2d3543}
+.empty{color:var(--dim);text-align:center;padding:24px 12px;font-size:11px;font-style:italic}
+.auth-overlay{position:fixed;inset:0;background:rgba(5,7,10,0.95);backdrop-filter:blur(20px);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px}
+.auth-overlay.show{display:flex}
+.auth-card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:32px 28px;width:100%;max-width:380px}
+.auth-logo{font-size:42px;text-align:center;margin-bottom:6px}
+.auth-title{text-align:center;font-size:22px;font-weight:700;letter-spacing:-.5px;background:linear-gradient(135deg,#58a6ff,#a371f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.auth-sub{text-align:center;font-size:11px;color:var(--dim);margin-bottom:20px;font-family:var(--mono)}
+.auth-tabs{display:flex;background:var(--bg);border-radius:8px;padding:3px;margin-bottom:16px}
+.auth-tab{flex:1;padding:8px;background:transparent;border:none;color:var(--dim);cursor:pointer;border-radius:6px;font-size:12px;font-weight:600;font-family:inherit;transition:.15s}
+.auth-tab.active{background:var(--accent);color:#000}
+.auth-form{display:none;flex-direction:column;gap:10px}
+.auth-form.active{display:flex}
+.auth-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 13px;color:var(--text);font-size:13px;font-family:inherit}
+.auth-input:focus{outline:none;border-color:var(--accent)}
+.auth-btn{background:var(--accent);color:#000;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;transition:.15s;margin-top:4px}
+.auth-btn:hover{background:#79b8ff}
+.auth-btn-success{background:var(--success)}
+.auth-btn-success:hover{background:#4fc965}
+.auth-error{color:var(--error);font-size:12px;text-align:center;margin-top:12px;min-height:16px}
+.user-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--isp));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#000}
+.qr-box{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center;margin-bottom:10px}
+.qr-box img{max-width:180px;border-radius:8px}
+.user-bar{display:flex;justify-content:space-between;align-items:center;background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:12px;font-size:12px}
+.user-name{font-weight:700;color:var(--text)}
+.user-node{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px}
 </style>
 </head>
 <body>
-<canvas id="starry-sky"></canvas>
-<button class="mobile-menu" onclick="toggleSidebar()">☰</button>
-<button class="panel-toggle" onclick="toggleInfoPanel()">📊</button>
-
-<!-- PANEL: только чтение -->
-<div class="info-panel hidden" id="infoPanel">
-  <div class="card-title" style="margin-bottom:10px"><span class="emoji">📊</span> Статистика</div>
-  <div class="stats-grid">
-    <div class="stat-card"><span class="stat-label">Узлов</span><span class="stat-value blue" id="statNodes">0</span></div>
-    <div class="stat-card"><span class="stat-label">Закреплений</span><span class="stat-value my" id="statInfected">0</span></div>
-    <div class="stat-card"><span class="stat-label">Отправлено</span><span class="stat-value" id="statSent">0</span></div>
-    <div class="stat-card"><span class="stat-label">Доставлено</span><span class="stat-value ok" id="statDelivered">0</span></div>
-    <div class="stat-card"><span class="stat-label">Потеряно</span><span class="stat-value err" id="statFailed">0</span></div>
-    <div class="stat-card"><span class="stat-label">Время работы</span><span class="stat-value" id="statUptime" style="color:var(--yellow);font-size:1em">0с</span></div>
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <div class="auth-logo">&#x1F331;</div>
+    <h1 class="auth-title">InevioNet</h1>
+    <p class="auth-sub">Живая сеть</p>
+    
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Вход</button>
+      <button class="auth-tab" data-tab="register">Регистрация</button>
+    </div>
+    
+    <div class="auth-form active" id="authLogin">
+      <input class="auth-input" id="loginUser" placeholder="Имя пользователя" autocomplete="username">
+      <input class="auth-input" id="loginPass" type="password" placeholder="Пароль" autocomplete="current-password">
+      <button class="auth-btn" onclick="doLogin()">Войти</button>
+    </div>
+    
+    <div class="auth-form" id="authRegister">
+      <input class="auth-input" id="regUser" placeholder="Имя пользователя" autocomplete="username">
+      <input class="auth-input" id="regPass" type="password" placeholder="Пароль (мин 4)" autocomplete="new-password">
+      <input class="auth-input" id="regPass2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
+      <button class="auth-btn auth-btn-success" onclick="doRegister()">Создать аккаунт</button>
+    </div>
+    
+    <div class="auth-error" id="authError"></div>
   </div>
 </div>
 
-<!-- SIDEBAR -->
-<div class="sidebar" id="sidebar">
-
-  <!-- HEADER -->
-  <div class="app-header">
-    <div class="app-title">InevioNet</div>
-    <div class="app-subtitle">Живая сеть • {{ version }}</div>
-    <div class="status-bar">
+<div class="app">
+  <header class="header">
+    <div class="brand">
+      <div class="logo">&#x1F331;</div>
+      <span>InevioNet</span>
+      <span class="v">v{{ version }}</span>
+    </div>
+    <div class="status">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Подключение...</span>
+      <span class="label">|</span>
+      <span><span class="label">узлов:</span> <span class="value" id="hdrNodes">0</span></span>
+      <span><span class="label">глубина:</span> <span class="value" id="hdrDepth">0</span></span>
+      <span><span class="label">циклов:</span> <span class="value" id="hdrCycles">0</span></span>
+      <span><span class="label">NAT:</span> <span class="value" id="hdrNat">-</span></span>
     </div>
-    <div class="public-addr" id="public-addr-box">
-      <span>🌐</span>
-      <span class="addr" id="public-ip">—</span>
-      <span class="nat" id="public-nat"></span>
+  </header>
+
+  <aside class="left">
+    <div class="section">
+      <div class="section-title">&#x1F4CA; Метрики организма</div>
+      <div class="metrics">
+        <div class="metric blue"><div class="l">Узлов</div><div class="v" id="mNodes">0</div></div>
+        <div class="metric green"><div class="l">Обучено</div><div class="v" id="mTaught">0</div></div>
+        <div class="metric purple"><div class="l">Реле</div><div class="v" id="mRelayed">0</div></div>
+        <div class="metric orange"><div class="l">Капсул</div><div class="v" id="mCapsuled">0</div></div>
+        <div class="metric blue"><div class="l">Глубина</div><div class="v" id="mDepth">0</div></div>
+        <div class="metric pink"><div class="l">Стего</div><div class="v" id="mStego">0</div></div>
+      </div>
     </div>
-    <div class="metrics-bar">
-      <div class="metric">
-        <span class="metric-label" style="color:var(--dim);font-size:0.85em">Узлов</span>
-        <span class="metric-value blue" id="hdrNodes">0</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label" style="color:var(--dim);font-size:0.85em">Закреп.</span>
-        <span class="metric-value pink" id="hdrInfected">0</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label" style="color:var(--dim);font-size:0.85em">Доставл.</span>
-        <span class="metric-value green" id="hdrDelivered">0</span>
-      </div>
+
+    <div class="section">
+      <div class="section-title">&#x1F9E0; Фазы НЛП</div>
+      <div class="phase-list" id="phaseList"><div class="empty">Нет данных</div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">&#x1F310; Узлы сети <span class="count" id="nodeCount">0</span></div>
+      <div class="node-list" id="nodeList"><div class="empty">Нет узлов</div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">&#x1F4DC; Лог</div>
+      <div class="log" id="logBox"></div>
+    </div>
+  </aside>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div class="canvas-overlay">
+      <button class="btn-icon" onclick="resetView()" title="Сброс вида">&#x27F2;</button>
+      <button class="btn-icon" onclick="fitView()" title="Вписать">&#x26F6;</button>
+      <button class="btn-icon" onclick="toggleLayout()" title="Сменить раскладку">&#x21C4;</button>
+    </div>
+    <div class="legend">
+      <div class="legend-row"><span class="d" style="background:var(--self)"></span>SELF</div>
+      <div class="legend-row"><span class="d" style="background:var(--lan)"></span>LAN</div>
+      <div class="legend-row"><span class="d" style="background:var(--router)"></span>ROUTER</div>
+      <div class="legend-row"><span class="d" style="background:var(--isp)"></span>ISP</div>
+      <div class="legend-row"><span class="d" style="background:var(--inev)"></span>INEVIONET</div>
+      <div class="legend-row"><span class="d" style="background:var(--spore)"></span>SPORE</div>
     </div>
   </div>
 
-  <!-- AUTH -->
-  <div id="authScreen" class="auth-screen" style="display:none">
-    <div class="auth-card">
-      <div style="font-size:2.2em;text-align:center">🌐</div>
-      <h2 style="text-align:center;margin:8px 0 16px;font-size:1.3em">Вход в сеть</h2>
-      <div class="auth-tabs">
-        <button class="tab-btn active" data-tab="login">Вход</button>
-        <button class="tab-btn" data-tab="register">Регистрация</button>
-      </div>
-      <div id="loginForm">
-        <div class="form-group"><label>Имя пользователя</label><input id="loginUsername" placeholder="Введите имя"></div>
-        <div class="form-group"><label>Пароль</label><input type="password" id="loginPassword" placeholder="Введите пароль"></div>
-        <button class="btn btn-primary" onclick="doLogin()">🔓 Войти</button>
-      </div>
-      <div id="registerForm" style="display:none">
-        <div class="form-group"><label>Имя пользователя</label><input id="regUsername" placeholder="Придумайте имя"></div>
-        <div class="form-group"><label>Пароль</label><input type="password" id="regPassword" placeholder="Придумайте пароль"></div>
-        <div class="form-group"><label>Повторите пароль</label><input type="password" id="regPassword2" placeholder="Ещё раз"></div>
-        <button class="btn btn-success" onclick="doRegister()">✨ Создать аккаунт</button>
-      </div>
-      <div id="authError" style="color:var(--red);text-align:center;font-size:0.85em;margin-top:10px"></div>
-    </div>
-  </div>
-
-  <!-- MAIN -->
-  <div id="mainInterface" style="display:none">
-
-    <div class="user-bar">
-      <div>
-        <div class="user-name" id="currentUsername">-</div>
-        <div class="user-node" id="currentUserNode"></div>
-      </div>
-      <button class="btn btn-sm btn-glass" onclick="doLogout()">Выйти</button>
+  <aside class="right">
+    <div class="tabs">
+      <div class="tab active" data-tab="inbox">&#x1F4E5; Входящие <span class="badge" id="inboxBadge" style="display:none">0</span></div>
+      <div class="tab" data-tab="send">&#x2709;&#xFE0F; Написать</div>
+      <div class="tab" data-tab="contacts">&#x1F465; Контакты</div>
+      <div class="tab" data-tab="dht">&#x1F310; DHT</div>
+      <div class="tab" data-tab="detail">&#x1F9E0; Детали</div>
     </div>
 
-    <!-- INBOX -->
-    <div class="card">
-      <div class="card-title"><span class="emoji">📥</span> Входящие</div>
-      <div id="inboxList" class="list" style="max-height:260px"><div class="empty">Пока пусто</div></div>
+    <div class="tab-content active" id="tab-inbox">
+      <div class="msg-list" id="inboxList"><div class="empty">Пока пусто</div></div>
     </div>
 
-    <!-- SEND -->
-    <div class="card">
-      <div class="card-title"><span class="emoji">✍️</span> Написать</div>
-      <div class="form-group"><label>Кому</label><input id="receiver" placeholder="Имя, ID или контакт"></div>
-      <div class="form-group"><label>Сообщение</label><textarea id="message" rows="3" placeholder="Введите текст..."></textarea></div>
-      <button class="btn btn-primary" onclick="sendMessage()">📤 Отправить</button>
-    </div>
-
-    <!-- CONTACTS -->
-    <div class="card">
-      <div class="card-title"><span class="emoji">👥</span> Контакты (<span id="contactsCount" style="color:var(--blue)">0</span>)</div>
-      <div id="contactsList" class="list"><div class="empty">Нет контактов</div></div>
-      <div class="form-group" style="margin-top:10px"><label>Добавить контакт (JSON из QR)</label><textarea id="qrImportData" rows="2" placeholder="Вставьте данные"></textarea></div>
-      <button class="btn btn-glass" onclick="addContactFromQR()">➕ Добавить</button>
-    </div>
-
-    <!-- QR -->
-    <div class="card">
-      <div class="card-title"><span class="emoji">📱</span> Мой QR</div>
-      <div style="text-align:center;margin-bottom:10px">
-        <img id="qrImage" src="" style="display:none;max-width:180px;border-radius:12px">
-        <div id="qrPlaceholder" style="color:var(--dim);font-size:0.85em;padding:16px">Нажмите кнопку</div>
+    <div class="tab-content" id="tab-send">
+      <div class="form-group">
+        <label class="form-label">Кому</label>
+        <input class="form-input" id="sendReceiver" placeholder="node_id, IP или контакт">
       </div>
-      <button class="btn btn-glass" onclick="generateQR()">🎨 Показать QR</button>
-      <button class="btn btn-glass" onclick="copyNodeId()">📋 Скопировать ID</button>
+      <div class="form-group">
+        <label class="form-label">Сообщение</label>
+        <textarea class="form-textarea" id="sendMessage" placeholder="Введите текст..."></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="sendMessage()">&#x1F4E4; Отправить</button>
+      <div id="sendResult" style="margin-top:8px;font-size:11px;color:var(--dim)"></div>
+      
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+        <div class="form-label" style="margin-bottom:10px">&#x1F4E1; Быстрые действия</div>
+        <button class="btn btn-ghost btn-sm" onclick="quickPing()" style="width:100%;margin-bottom:6px">Проверить доступность</button>
+        <button class="btn btn-ghost btn-sm" onclick="quickBootstrap()" style="width:100%;margin-bottom:6px">Опубликовать Seed</button>
+        <button class="btn btn-ghost btn-sm" onclick="showBootstrapStatus()" style="width:100%">Статус Bootstrap</button>
+      </div>
     </div>
 
-    <!-- ADVANCED -->
-    <div class="card">
-      <div class="card-title advanced-toggle" onclick="toggleAdvanced()">
-        <span><span class="emoji">⚙️</span> Ещё</span>
-        <span class="arrow" id="advancedArrow">▶</span>
-      </div>
-      <div class="advanced-content" id="advancedContent">
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">📡</span> Сканеры</div>
-        <button class="btn btn-glass" onclick="scanWiFi()">📶 Wi-Fi (netsh)</button>
-        <button class="btn btn-glass" onclick="scanWiFiPywifi()">📡 Wi-Fi (pywifi, dBm)</button>
-        <button class="btn btn-glass" onclick="scanWiFiCombined()">🔀 Wi-Fi (pywifi + netsh)</button>
-        <button class="btn btn-glass" onclick="scanBLE()">📱 Bluetooth (BLE)</button>
-        <button class="btn btn-glass" onclick="scanLTE()">📡 Сотовые сети</button>
-        <button class="btn btn-glass" onclick="scanEthernet()">🌐 Ethernet (пром.)</button>
-        <button class="btn btn-glass" onclick="scanIndustrial()">🏭 Industrial (IP:порт)</button>
-        <button class="btn btn-glass" onclick="scanNeighbors()">🔍 Найти соседей (все порты)</button>
-        <div id="scanResult" style="margin-top:8px;font-size:0.8em;color:var(--dim)"></div>
-        <div id="industrialResults" style="margin-top:6px;font-size:0.8em;color:var(--dim)"></div>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">🧅</span> Анонимность</div>
-        <button class="btn btn-glass" onclick="checkTor()">🧅 Проверить Tor</button>
-        <button class="btn btn-glass" onclick="checkI2P()">🌐 Проверить I2P</button>
-        <div id="anonResult" style="margin-top:8px;font-size:0.8em;color:var(--dim)"></div>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">🌉</span> P2P Мост</div>
-        <div class="form-group"><label>Регион</label><input id="bridgeRegion" value="RU"></div>
-        <div class="form-group"><label>Лимит клиентов</label><input id="bridgeCapacity" value="10" type="number"></div>
-        <button class="btn btn-glass" onclick="checkBridge()">📊 Статус</button>
-        <button class="btn btn-success" onclick="becomeVolunteer()">✅ Стать реле-узлом</button>
-        <button class="btn btn-glass" onclick="stopVolunteer()">⛔ Остановить</button>
-        <div id="bridgeResult" style="margin-top:8px;font-size:0.8em;color:var(--dim)"></div>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">🌱</span> Мицелий</div>
-        <button class="btn btn-success" onclick="growNetwork()">🌱 Расти (probe)</button>
-        <button class="btn btn-glass" onclick="showMap()">🗺️ Карта сети</button>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">🤖</span> AI Селектор</div>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:0.85em;color:var(--dim)">Лучший протокол</span>
-          <span id="aiBestName" style="font-weight:700;color:var(--green);font-size:0.95em">—</span>
+    <div class="tab-content" id="tab-contacts">
+      <div class="user-bar">
+        <div>
+          <div class="user-name" id="myUsername">-</div>
+          <div class="user-node" id="myNodeId">-</div>
         </div>
-        <div style="margin-top:6px;height:6px;background:rgba(120,120,128,0.24);border-radius:3px;overflow:hidden">
-          <div id="aiBestBar" style="height:100%;width:0%;background:linear-gradient(90deg,#ff453a,#ffd60a,#30d158);transition:width 0.6s"></div>
+        <button class="btn-icon" onclick="copyMyNodeId()" title="Скопировать ID">&#x1F4CB;</button>
+      </div>
+      
+      <div class="section-title" style="margin-bottom:10px">&#x1F465; Контакты <span class="count" id="contactsCount">0</span></div>
+      <div id="contactsList"><div class="empty">Нет контактов</div></div>
+      
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div class="form-label" style="margin-bottom:6px">Добавить контакт (JSON из QR)</div>
+        <textarea class="form-textarea" id="qrImportData" placeholder='{"username":"...","node_id":"..."}' style="min-height:60px;font-size:11px"></textarea>
+        <button class="btn btn-ghost" onclick="addContactFromQR()" style="margin-top:8px">&#x2795; Добавить</button>
+      </div>
+      
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div class="form-label" style="margin-bottom:6px">&#x1F4F1; Мой QR-код</div>
+        <div class="qr-box">
+          <img id="qrImage" src="" style="display:none">
+          <div id="qrPlaceholder" style="color:var(--dim);font-size:11px;font-style:italic">Нажмите кнопку</div>
         </div>
-        <div style="text-align:right;font-family:monospace;font-size:0.75em;color:var(--dim);margin-top:4px">
-          Score: <span id="aiBestScore">0.00</span>
-        </div>
-        <div id="aiTopList" style="margin-top:8px">
-          <div class="empty" style="padding:8px;font-size:0.8em">Нет данных</div>
-        </div>
-        <button class="btn btn-glass" style="margin-top:8px" onclick="loadAIStats()">📊 Обновить</button>
-        <button class="btn btn-sm btn-glass" onclick="resetAI()">🔄 Сбросить</button>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">🌐</span> Капсулы</div>
-        <div class="form-group"><label>Доверенное устройство</label><input id="capsuleHostInput" placeholder="192.168.1.100"></div>
-        <div class="form-group"><label>Метка</label><input id="capsuleLabelInput" placeholder="Мой сервер"></div>
-        <button class="btn btn-glass" onclick="addTrusted()">➕ Добавить в доверенные</button>
-        <button class="btn btn-success" onclick="deployAllNodes()">🌐 Развернуть на все узлы</button>
-        <button class="btn btn-glass" onclick="deployAll()">📋 Развернуть на доверенные</button>
-        <button class="btn btn-sm btn-glass" onclick="loadCapsuleStats()">📊 Обновить</button>
-        <div id="capsuleList" style="margin-top:8px;font-size:0.8em"></div>
-        <div id="capsuleStats" style="margin-top:4px;font-size:0.75em;color:var(--dim)"></div>
-
-        <div class="sep"></div>
-
-        <div class="card-title" style="font-size:0.9em;margin-bottom:8px"><span class="emoji">📋</span> Системный лог</div>
-        <div class="log-container" id="logContainer"></div>
-        <button class="btn btn-sm btn-glass" style="margin-top:6px" onclick="clearLogs()">🗑️ Очистить</button>
-
+        <button class="btn btn-ghost" onclick="generateQR()">&#x1F3A8; Показать QR</button>
       </div>
     </div>
 
-  </div>
+    <div class="tab-content" id="tab-dht">
+      <div class="section-title" style="margin-bottom:10px">&#x1F310; Моя сеть</div>
+      
+      <div class="detail-row" style="padding:8px 0">
+        <span class="l">Serial</span>
+        <span class="v" id="mySerial" style="color:var(--accent)">—</span>
+      </div>
+      <div class="detail-row" style="padding:8px 0">
+        <span class="l">Node ID</span>
+        <span class="v" id="myNodeIdDht" style="font-size:11px">—</span>
+      </div>
+      <div class="detail-row" style="padding:8px 0">
+        <span class="l">Public</span>
+        <span class="v" id="myPublic" style="font-size:11px">—</span>
+      </div>
+      <div class="detail-row" style="padding:8px 0">
+        <span class="l">NAT</span>
+        <span class="v" id="myNat" style="font-size:11px">—</span>
+      </div>
+      <div class="detail-row" style="padding:8px 0">
+        <span class="l">Реле</span>
+        <span class="v" id="myRelays" style="color:var(--isp)">0</span>
+      </div>
+      
+      <div class="section-title" style="margin-top:16px;margin-bottom:8px">&#x1F4CB; Мой JSON (для QR/копирования)</div>
+      <textarea class="form-textarea" id="myJson" readonly style="min-height:120px;font-size:10px"></textarea>
+      <button class="btn btn-primary" onclick="copyMyJson()" style="margin-top:8px">&#x1F4CB; Копировать JSON</button>
+      
+      <div class="section-title" style="margin-top:20px;margin-bottom:8px">&#x2795; Добавить peer (DHT)</div>
+      <textarea class="form-textarea" id="peerJsonInput" placeholder='Вставьте JSON другого узла' style="min-height:80px;font-size:10px"></textarea>
+      <button class="btn btn-success" onclick="addPeerFromJson()" style="margin-top:8px">&#x2795; Добавить в DHT</button>
+      
+      <div class="section-title" style="margin-top:20px;margin-bottom:8px">&#x1F4F1; Мой QR (для доверия)</div>
+      <div class="qr-box" style="text-align:center;margin-bottom:8px">
+        <img id="qrTrustImage" src="" style="display:none;max-width:180px;border-radius:8px;background:#fff;padding:8px">
+        <div id="qrTrustPlaceholder" style="color:var(--dim);font-size:11px;font-style:italic">Нажмите кнопку</div>
+      </div>
+      <button class="btn btn-ghost" onclick="showMyQr()">&#x1F4F1; Показать QR</button>
+      
+      <div class="section-title" style="margin-top:20px;margin-bottom:8px">&#x1F91D; Доверие (вставить JSON)</div>
+      <textarea class="form-textarea" id="trustJsonInput" placeholder='Вставьте JSON для доверия' style="min-height:80px;font-size:10px"></textarea>
+      <button class="btn btn-primary" onclick="addTrustFromJson()" style="margin-top:8px">&#x1F91D; Добавить в доверенные</button>
+      
+      <div class="section-title" style="margin-top:16px;margin-bottom:8px">
+        &#x1F512; Доверенные <span class="count" id="trustCount">0</span>
+      </div>
+      <div id="trustList" style="margin-top:8px"><div class="empty">Нет доверенных</div></div>
+      
+      <div class="section-title" style="margin-top:20px;margin-bottom:8px">
+        &#x1F465; Peers DHT <span class="count" id="dhtPeersCount">0</span>
+      </div>
+      <div class="detail-row" style="padding:6px 0;font-size:11px">
+        <span class="l">Всего узлов сети</span>
+        <span class="v" id="dhtTotalNodes" style="color:var(--success)">0</span>
+      </div>
+      <div class="detail-row" style="padding:6px 0;font-size:11px;border-bottom:1px solid var(--border)">
+        <span class="l">Всего реле сети</span>
+        <span class="v" id="dhtTotalRelays" style="color:var(--isp)">0</span>
+      </div>
+      <div id="dhtPeersList" style="margin-top:8px"><div class="empty">Нет peers</div></div>
+    </div>
+
+    <div class="tab-content" id="tab-detail">
+      <div id="detailPanel">
+        <div class="empty">Выберите узел на карте<br>или в списке слева</div>
+      </div>
+    </div>
+  </aside>
 </div>
 
 <script>
-const socket = io();
-let currentUser = null;
-let nodes = {}, stars = [];
-let zoom = 1, panX = 0, panY = 0;
-let dragging = false, dsx = 0, dsy = 0;
-
-const canvas = document.getElementById('starry-sky');
-const ctx = canvas.getContext('2d');
-const COLORS = { self:'#30d158', wifi:'#0a84ff', bluetooth:'#64d2ff', peer:'#bf5af2', spore:'#ff375f', ble:'#5ac8fa', cellular:'#ffd60a', industrial:'#ff9f0a', super:'#ffffff', inevionet:'#ffd60a', router:'#30d158', device:'#ffffff', traceroute:'#bf5af2', local_device:'#5ac8fa' };
-const RANK = { self:0, inevionet:1, router:2, wifi:3, super:4, device:5, local_device:6, spore:7, ble:8, bluetooth:9, cellular:10, traceroute:11, industrial:12, peer:13 };
-
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
-function toggleInfoPanel() { document.getElementById('infoPanel').classList.toggle('hidden'); }
-function toggleAdvanced() {
-    const el = document.getElementById('advancedContent');
-    const arrow = document.getElementById('advancedArrow');
-    if (el.classList.contains('open')) {
-        el.classList.remove('open');
-        arrow.textContent = '▶';
-    } else {
-        el.classList.add('open');
-        arrow.textContent = '▼';
-    }
-}
-
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  if (!panX && !panY) { panX = canvas.width / 2; panY = canvas.height / 2; }
-}
-resize();
-window.addEventListener('resize', resize);
-
-canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  const d = e.deltaY > 0 ? 0.9 : 1.1;
-  const nz = Math.max(0.2, Math.min(5, zoom * d));
-  const r = canvas.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
-  zoom = nz;
-  panX = mx - wx * zoom;
-  panY = my - wy * zoom;
-}, { passive:false });
-
-canvas.addEventListener('mousedown', e => { dragging = true; dsx = e.clientX - panX; dsy = e.clientY - panY; });
-canvas.addEventListener('mousemove', e => { if (dragging) { panX = e.clientX - dsx; panY = e.clientY - dsy; } });
-canvas.addEventListener('mouseup', () => dragging = false);
-canvas.addEventListener('mouseleave', () => dragging = false);
-canvas.addEventListener('dblclick', () => { zoom = 1; panX = canvas.width / 2; panY = canvas.height / 2; });
-
-function hash(id) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) { h = ((h << 5) - h) + id.charCodeAt(i); h = h & h; }
-  return Math.abs(h);
-}
-
-// P87: радиальная раскладка по hops
-function radiusForHops(hops, type) {
-  // P87g: глубина до 100, логарифмическая шкала
-  if (hops === 0) return 0;
-  if (type === 'wifi') return 140;
-  // Логарифмическая шкала: radius = base * log2(hops+1) * scale
-  const base = 70;
-  const maxHops = 100;
-  const h = Math.min(hops, maxHops);
-  // log2 шкала: hops=1 -> 70, hops=2 -> 110, hops=4 -> 160, hops=8 -> 210, hops=16 -> 260, hops=32 -> 310, hops=64 -> 360, hops=100 -> 400
-  return base + (Math.log2(h + 1) / Math.log2(maxHops + 1)) * 400;
-}
-
-function layout(nd, pm) {
-  const h = hash(nd.node_id);
-  const hops = nd.hops || 1;
-
-  // P87c: traceroute - спираль
-  // P88: споры вокруг WiFi-родителя
-  if (nd.type === 'spore') {
-    let macParent = null;
-    if (nd.via && nd.via.startsWith('wifi_')) {
-      const raw = nd.via.slice(5);
-      if (raw.length === 12) {
-        macParent = raw.slice(0,2)+':'+raw.slice(2,4)+':'+raw.slice(4,6)+':'+raw.slice(6,8)+':'+raw.slice(8,10)+':'+raw.slice(10,12);
-      }
-    }
-    const p = macParent && pm[macParent];
-    if (p) {
-      const a2 = (h % 360) * Math.PI / 180;
-      const r2 = 25 + (h % 15);
-      return { x: p.x + Math.cos(a2) * r2, y: p.y + Math.sin(a2) * r2 };
-    }
-    const r3 = 200 + (h % 60);
-    return { x: Math.cos(a) * r3, y: Math.sin(a) * r3 };
+const CFG = {
+  REFRESH_MS: 5000,
+  TREE_MS: 10000,
+  ORG_MS: 3000,
+  INBOX_MS: 8000,
+  COLORS: {
+    self:'#58a6ff', lan_device:'#3fb950', router:'#d29922',
+    isp_router:'#a371f7', inevionet:'#f0883e', spore:'#f85149',
+    service:'#79c0ff', wifi:'#39c5cf', device:'#8b949e'
   }
-
-  if (nd.type === 'traceroute') {
-    const angle = hops * 18 * Math.PI / 180;  // P87g: 100 hops = 5 витков°
-    const r = radiusForHops(hops, 'traceroute');
-    return { x: Math.cos(angle) * r, y: Math.sin(angle) * r };
-  }
-
-  const a = (h % 360) * Math.PI / 180;
-  if (nd.type === 'self') return { x:0, y:0 };
-  const r = radiusForHops(hops, nd.type);
-  const jitter = (h % 20) - 10;
-  return { x: Math.cos(a) * (r + jitter), y: Math.sin(a) * (r + jitter) };
-}
-
-function animate() {
-  ctx.fillStyle = 'rgba(0,4,40,0.15)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (Math.random() < 0.06) {
-    ctx.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.5) + ')';
-    ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1.5, 1.5);
-  }
-  ctx.save();
-  ctx.translate(panX, panY);
-  ctx.scale(zoom, zoom);
-  ctx.lineWidth = 1 / zoom;
-  const pm = {};
-  stars.forEach(s => pm[s.node.node_id] = s);
-  // P87c: линии между узлами
-  stars.forEach(s => {
-    const p = s.node.parent && pm[s.node.parent];
-    if (p) {
-      let col = 'rgba(10,132,255,0.25)';
-      if (s.node.type === 'spore') col = 'rgba(255,55,95,0.4)';
-      else if (s.node.type === 'traceroute') {
-        col = tracerouteColor(s.node.hops || 1);
-        // сделать прозрачным
-        col = col.replace('rgb(', 'rgba(').replace(')', ',0.5)');
-      }
-      ctx.strokeStyle = col;
-      ctx.lineWidth = (s.node.type === 'traceroute' ? 1.5 : 1) / zoom;
-      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(s.x, s.y); ctx.stroke();
-    }
-  });
-  stars.forEach(s => {
-    s.pulse += 0.04;
-    const r = s.base * (1 + Math.sin(s.pulse) * 0.22);
-    // P87c: использовать s.color для traceroute
-    let col;
-    if (s.color) col = s.color;
-    else if (s.node.evolving) col = '#ffd60a';
-    else col = COLORS[s.node.type] || '#8888aa';
-    // P87g: безопасный градиент
-    function toRgba(c, alpha) {
-      if (!c || typeof c !== 'string') return 'rgba(136,136,170,' + alpha + ')';
-      if (c.startsWith('#')) {
-        // hex -> rgba
-        const hex = c.slice(1);
-        const r = parseInt(hex.slice(0,2), 16);
-        const g = parseInt(hex.slice(2,4), 16);
-        const b = parseInt(hex.slice(4,6), 16);
-        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
-      }
-      if (c.startsWith('rgb(')) {
-        return c.replace('rgb(', 'rgba(').replace(')', ',' + alpha + ')');
-      }
-      if (c.startsWith('rgba(')) {
-        return c.replace(/,[^,]+\)$/, ',' + alpha + ')');
-      }
-      return 'rgba(136,136,170,' + alpha + ')';
-    }
-    const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 5);
-    g.addColorStop(0, toRgba(col, 0.5));
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(s.x, s.y, r * 5, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
-    ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
-    if (s.node.type === 'self') { ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); }
-    ctx.font = '11px -apple-system,sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillText(s.node.label || s.node.name || s.node.node_id, s.x + r + 6, s.y + 3);
-  });
-  ctx.restore();
-  requestAnimationFrame(animate);
-}
-animate();
-
-function addLog(msg, type) {
-  const c = document.getElementById('logContainer');
-  if (!c) return;
-  const e = document.createElement('div');
-  e.className = 'log-entry ' + (type || 'info');
-  e.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-  c.appendChild(e);
-  while (c.children.length > 200) c.removeChild(c.firstChild);
-  c.scrollTop = c.scrollHeight;
-}
-function clearLogs() { document.getElementById('logContainer').innerHTML = ''; }
-
-socket.on('connect', () => {
-  document.getElementById('statusDot').classList.add('on');
-  document.getElementById('statusText').textContent = 'Подключено';
-  addLog('Соединение установлено', 'success');
-  socket.emit('request_stats');
-});
-socket.on('disconnect', () => {
-  document.getElementById('statusDot').classList.remove('on');
-  document.getElementById('statusText').textContent = 'Отключено';
-  addLog('Соединение потеряно', 'error');
-});
-socket.on('server_log', d => { addLog(d.msg, d.level === 'ERROR' ? 'error' : (d.level === 'WARNING' ? 'warn' : 'info')); });
-socket.on('inbox_new', m => { addLog('Новое сообщение от ' + (m.sender || '?'), 'success'); loadInbox(); });
-// P87: fetch дерева из /api/network/tree
-async function loadTreeFromAPI() {
-  try {
-    const r = await fetch('/api/network/tree?force=0');
-    const d = await r.json();
-    if (!d.success || !d.root) return;
-
-    // Обходим дерево, собираем плоский список узлов
-    const flat = [];
-    const walk = (node) => {
-      flat.push(node);
-      if (node.children) node.children.forEach(walk);
-    };
-    walk(d.root);
-
-    // Преобразуем в формат nodes для layout
-    const newNodes = {};
-    for (const n of flat) {
-      if (!n.node_id) continue;
-      // P88: нормализация типа
-      let ntype = n.node_type || 'device';
-      if (n.node_id.startsWith('tr_')) ntype = 'traceroute';
-      else if (n.node_id.startsWith('web_node_')) ntype = 'inevionet';
-      else if (n.node_id.startsWith('router_')) ntype = 'router';
-      else if (n.node_id.startsWith('dev_')) ntype = 'device';
-      else if (n.node_id.startsWith('mdns_')) ntype = 'local_device';
-      else if (n.node_id.startsWith('spore_')) ntype = 'spore';
-      else if (n.node_id.includes(':') && n.node_id.length === 17) ntype = 'wifi';
-      newNodes[n.node_id] = {
-        node_id: n.node_id,
-        name: n.name || n.node_id,
-        label: n.name || n.node_id,
-        type: ntype,
-        ip: n.ip || '',
-        mac: n.mac || '',
-        hops: n.hops || 0,
-        via: n.via || '',
-        parent: n.via || null,
-        trust: 50,
-        rssi: (n.metadata && n.metadata.rssi) || (n.rssi) || -70,
-        signal: (n.metadata && n.metadata.signal) || 50,
-      };
-    }
-    nodes = newNodes;
-    rebuildStars();
-
-    const count = flat.length;
-    const el1 = document.getElementById('statNodes');
-    const el2 = document.getElementById('hdrNodes');
-    if (el1) el1.textContent = count;
-    if (el2) el2.textContent = count;
-
-    // Depth в statInfected (временно)
-    const depth = d.stats && d.stats.max_depth ? d.stats.max_depth : 0;
-    const el3 = document.getElementById('statInfected');
-    const el4 = document.getElementById('hdrInfected');
-    if (el3) el3.textContent = depth;
-    if (el4) el4.textContent = depth;
-  } catch (e) {
-    console.debug('loadTree error:', e);
-  }
-}
-
-function tracerouteColor(hop) {
-  // P87g: градиент для 100 hops
-  // hop 1: #0a84ff (синий), hop 100: #bf5af2 (фиолетовый)
-  const t = Math.min(1, (hop - 1) / 99);
-  const r = Math.round(10 + (191 - 10) * t);
-  const g = Math.round(132 + (90 - 132) * t);
-  const b = Math.round(255 + (242 - 255) * t);
-  return 'rgb(' + r + ',' + g + ',' + b + ')';
-}
-
-function rebuildStars() {
-  const pm = {};
-  const order = Object.values(nodes).sort((a, b) => (RANK[a.type] || 9) - (RANK[b.type] || 9));
-  order.forEach(nd => { pm[nd.node_id] = layout(nd, pm); });
-  stars = order.map(nd => {
-    const old = stars.find(s => s.node.node_id === nd.node_id);
-    const p = pm[nd.node_id];
-    let base = 3;
-    let color = null;
-    if (nd.type === 'self') base = 8;
-    else if (nd.type === 'inevionet') base = 5;
-    else if (nd.type === 'router') base = 4;
-    else if (nd.type === 'wifi') base = 3.5;
-    else if (nd.type === 'device') base = 2.5;
-    else if (nd.type === 'traceroute') {
-      base = 2.5;
-      color = tracerouteColor(nd.hops || 1);
-    }
-    else if (nd.type === 'spore') {
-      // P88: размер споры по rssi
-      const rssi = (nd.rssi || -70);
-      base = 2 + Math.max(0, (rssi + 100) / 70 * 2);
-      color = '#ff375f';
-    }
-    return {
-      node: nd,
-      x: p.x, y: p.y,
-      base: base,
-      color: color,
-      pulse: old ? old.pulse : Math.random() * 6
-    };
-  });
-}
-
-// Socket: nodes_update
-socket.on('nodes_update', d => {
-  // P87: подтягиваем дерево, а не только nodes
-  loadTreeFromAPI();
-});
-
-// Периодически обновляем дерево каждые 30 сек
-setInterval(loadTreeFromAPI, 30000);
-// При загрузке
-setTimeout(loadTreeFromAPI, 2000);
-socket.on('stats_update', st => {
-  document.getElementById('statSent').textContent = st.packets_sent || 0;
-  const deliv = st.packets_delivered || 0;
-  document.getElementById('statDelivered').textContent = deliv;
-  document.getElementById('hdrDelivered').textContent = deliv;
-  document.getElementById('statFailed').textContent = st.packets_failed || 0;
-  const u = st.uptime || 0;
-  document.getElementById('statUptime').textContent = Math.floor(u / 60) + 'м ' + Math.floor(u % 60) + 'с';
-});
-
-document.querySelectorAll('.tab-btn').forEach(b => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    const t = b.dataset.tab;
-    document.getElementById('loginForm').style.display = t === 'login' ? 'block' : 'none';
-    document.getElementById('registerForm').style.display = t === 'register' ? 'block' : 'none';
-  });
-});
-
-// P87g: 401 /api/me - нормально (не залогинен), игнорируем
-const _origFetch = window.fetch;
-window.fetch = function(url, opts) {
-  return _origFetch.apply(this, arguments).catch(e => {
-    if (url && url.toString().includes('/api/me')) {
-      // Тихо игнорируем
-      return new Response('{}', {status: 200, headers: {'Content-Type': 'application/json'}});
-    }
-    throw e;
-  });
 };
 
-function showAuth() { document.getElementById('authScreen').style.display = 'flex'; document.getElementById('mainInterface').style.display = 'none'; }
-function showMain() {
-  document.getElementById('authScreen').style.display = 'none';
-  document.getElementById('mainInterface').style.display = 'block';
-  document.getElementById('currentUsername').textContent = currentUser.username;
-  document.getElementById('currentUserNode').textContent = currentUser.node_id || '';
-  loadContacts(); loadInbox();
-}
-function checkAuth() {
-  fetch('/api/me').then(r => r.json()).then(d => { if (d.success) { currentUser = d.user; showMain(); } else showAuth(); }).catch(showAuth);
-}
-function doLogin() {
-  const u = document.getElementById('loginUsername').value.trim();
-  const p = document.getElementById('loginPassword').value;
-  fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p}) })
-  .then(r => r.json()).then(d => {
-    if (d.success) { currentUser = d.user; showMain(); addLog('Добро пожаловать, ' + u, 'success'); }
-    else { document.getElementById('authError').textContent = d.error; }
-  });
-}
-function doRegister() {
-  const u = document.getElementById('regUsername').value.trim();
-  const p = document.getElementById('regPassword').value;
-  const p2 = document.getElementById('regPassword2').value;
-  if (p !== p2) { document.getElementById('authError').textContent = 'Пароли не совпадают'; return; }
-  fetch('/api/register', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p}) })
-  .then(r => r.json()).then(d => {
-    if (d.success) { currentUser = d.user; showMain(); addLog('Аккаунт создан: ' + u, 'success'); }
-    else { document.getElementById('authError').textContent = d.error; }
-  });
-}
-function doLogout() { fetch('/api/logout', { method:'POST' }).then(() => { currentUser = null; showAuth(); }); }
+const state = {
+  organism: null,
+  tree: null,
+  nodes: {},
+  selected: null,
+  camera: {x:0, y:0, zoom:1},
+  stars: [],
+  layout: 'radial',
+  dragging: false,
+  dragStart: {x:0, y:0},
+  canvas: null,
+  ctx: null,
+  currentUser: null,
+  inboxCount: 0,
+  lastInboxLen: 0
+};
 
-function sendMessage() {
-  const r = document.getElementById('receiver').value;
-  const m = document.getElementById('message').value;
-  if (!r || !m) { addLog('Заполните все поля', 'error'); return; }
-  fetch('/api/p2/send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({receiver:r, message:m}) })
-  .then(r2 => r2.json()).then(d => {
-    addLog(d.success ? '✅ Отправлено' : '❌ Ошибка: ' + (d.error || ''), d.success ? 'success' : 'error');
-    if (d.success) document.getElementById('message').value = '';
-  });
-}
-function loadInbox() {
-  fetch('/api/p2/inbox').then(r => r.json()).then(d => {
-    const el = document.getElementById('inboxList');
-    if (!el) return;
-    if (!d.messages || !d.messages.length) { el.innerHTML = '<div class="empty">Пока пусто</div>'; return; }
-    el.innerHTML = d.messages.slice().reverse().map(m => '<div class="list-item"><div><b>' + (m.sender || '?') + '</b><br><span style="color:var(--dim);font-size:0.85em">' + (m.message || '') + '</span></div><span style="color:var(--dim);font-size:0.7em">' + new Date(m.ts * 1000).toLocaleTimeString() + '</span></div>').join('');
-  }).catch(() => {});
+function $(id) { return document.getElementById(id); }
+
+function addLog(msg, type) {
+  const box = $('logBox');
+  if (!box) return;
+  const e = document.createElement('div');
+  e.className = 'log-entry ' + (type || 'info');
+  const t = new Date().toLocaleTimeString('ru-RU');
+  e.textContent = '[' + t + '] ' + msg;
+  box.appendChild(e);
+  while (box.children.length > 100) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
 }
 
-function checkTor() {
-  addLog('Проверка Tor...', 'info');
-  fetch('/api/tor/status').then(r => r.json()).then(d => {
-    const el = document.getElementById('anonResult');
-    if (d.available) { el.textContent = '🧅 Tor: Доступен'; addLog('Tor работает', 'success'); }
-    else { el.textContent = '🧅 Tor: Не запущен'; addLog('Tor не найден', 'warn'); }
-  });
-}
-function checkI2P() {
-  addLog('Проверка I2P...', 'info');
-  fetch('/api/i2p/status').then(r => r.json()).then(d => {
-    const el = document.getElementById('anonResult');
-    if (d.available) { el.textContent = '🌐 I2P: Доступен'; addLog('I2P работает', 'success'); }
-    else { el.textContent = '🌐 I2P: Не запущен'; addLog('I2P не найден', 'warn'); }
+function colorForType(t) { return CFG.COLORS[t] || CFG.COLORS.device; }
+function planClass(p) { return 'plan-' + (p || 'route'); }
+
+// === TABS ===
+function initTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.onclick = () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      const name = tab.dataset.tab;
+      $('tab-' + name).classList.add('active');
+      if (name === 'inbox') { state.inboxCount = 0; updateInboxBadge(); loadInbox(); }
+      if (name === 'contacts') loadContacts();
+      if (name === 'dht') { fetchDhtMyInfo(); fetchDhtPeers(); }
+    };
   });
 }
 
-function scanWiFi() {
-  addLog('Поиск Wi-Fi сетей...', 'info');
-  document.getElementById('scanResult').textContent = 'Сканирование Wi-Fi...';
-  fetch('/api/rf/scan', { method:'POST' }).then(r => r.json()).then(d => {
-    document.getElementById('scanResult').textContent = '📶 Wi-Fi: ' + (d.wifi || 0) + ' | 📱 BT: ' + (d.bt || 0);
-    addLog('Wi-Fi найдено: ' + (d.wifi || 0), 'success');
+function switchToTab(name) {
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === name);
   });
-}
-function scanWiFiPywifi() {
-  addLog('pywifi scan (dBm)...', 'info');
-  document.getElementById('scanResult').textContent = 'pywifi scanning...';
-  fetch('/api/wifi/pywifi/scan', {method:'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.success) {
-        document.getElementById('scanResult').textContent = '📡 pywifi: ' + d.count + ' сетей';
-        addLog('pywifi: ' + d.count + ' сетей (dBm)', 'success');
-      }
-    });
-}
-function scanWiFiCombined() {
-  addLog('Combined scan (pywifi + netsh)...', 'info');
-  fetch('/api/wifi/combined/scan', {method:'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.success) {
-        const by = d.by_source || {};
-        addLog('Combined: ' + d.count + ' (pywifi: ' + (by.pywifi||0) + ', netsh: ' + (by.netsh||0) + ')', 'success');
-      }
-    });
-}
-function scanBLE() {
-  addLog('Поиск Bluetooth (5 сек)...', 'info');
-  document.getElementById('scanResult').textContent = 'Сканирование BLE...';
-  fetch('/api/ble/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({duration:5}) }).then(r => r.json()).then(d => {
-    document.getElementById('scanResult').textContent = '📱 BLE: ' + (d.count || 0);
-    addLog('BLE: ' + (d.count || 0), 'success');
-  });
-}
-function scanLTE() {
-  addLog('Поиск сотовых сетей...', 'info');
-  fetch('/api/cellular/scan', { method:'POST' }).then(r => r.json()).then(d => {
-    const modem = (d.modem || []).length;
-    const wifi = (d.via_wifi || []).length;
-    document.getElementById('scanResult').textContent = '📡 Модем: ' + modem + ' | Wi-Fi: ' + wifi;
-    addLog('Сотовые: ' + (modem + wifi), 'success');
-  });
-}
-function scanEthernet() {
-  addLog('Ethernet scan...', 'info');
-  fetch('/api/ethernet/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) })
-    .then(r => r.json()).then(d => {
-      if (d.success) {
-        document.getElementById('industrialResults').textContent = '🌐 Ethernet: ' + d.count + ' хостов';
-        addLog('Ethernet: ' + d.count, 'success');
-      }
-    });
-}
-function scanIndustrial() {
-  const target = document.getElementById('industrialResults').dataset.target || prompt('IP:порт (например 192.168.1.1:502)');
-  if (!target) return;
-  addLog('Industrial scan: ' + target, 'info');
-  fetch('/api/industrial/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target}) })
-    .then(r => r.json()).then(d => {
-      if (d.success) {
-        let out = [];
-        for (const [proto, res] of Object.entries(d.results || {})) {
-          out.push(proto + ': ' + (res.found ? '✅' : '❌'));
-        }
-        document.getElementById('industrialResults').textContent = out.join(' | ');
-      }
-    });
-}
-function scanNeighbors() {
-  addLog('🔍 Сканирование всех ARP + портов...', 'info');
-  fetch('/api/network/scan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({timeout: 2}) })
-    .then(r => r.json()).then(d => {
-      if (d.success) {
-        addLog('🔍 Просканировано: ' + d.scanned + ', найдено: ' + d.found_count, d.found_count > 0 ? 'success' : 'warn');
-        for (const f of (d.found || [])) addLog('  ✅ ' + f.ip + ' (' + f.scheme + ':' + f.port + ')', 'success');
-        const m = d.merged || {};
-        addLog('📊 Merged: +' + (m.added_nodes||0) + ' nodes, +' + (m.added_edges||0) + ' edges', 'info');
-      }
-    });
-}
-
-function checkBridge() {
-  fetch('/api/bridge/status').then(r => r.json()).then(d => {
-    const b = d.broker || {};
-    document.getElementById('bridgeResult').textContent = 'Реле: ' + (b.total_relays || 0) + ' | Доступно: ' + (b.available_relays || 0);
-  });
-}
-function becomeVolunteer() {
-  const region = document.getElementById('bridgeRegion').value || 'unknown';
-  const capacity = parseInt(document.getElementById('bridgeCapacity').value) || 10;
-  fetch('/api/bridge/volunteer', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({region, capacity}) }).then(r => r.json()).then(d => {
-    if (d.success) { document.getElementById('bridgeResult').textContent = '✅ Реле-узел! Лимит: ' + (d.relay.capacity || 0); addLog('Реле-узел запущен', 'success'); }
-  });
-}
-function stopVolunteer() {
-  fetch('/api/bridge/stop', { method:'POST' }).then(r => r.json()).then(d => {
-    if (d.success) { document.getElementById('bridgeResult').textContent = 'Остановлен'; }
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === 'tab-' + name);
   });
 }
 
-async function growNetwork() {
-    addLog('🌱 Рост мицелия...', 'info');
-    try {
-        const r = await fetch('/api/network/probe', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({max_hops: 5}) });
-        const d = await r.json();
-        if (d.success) {
-            addLog('🌱 Проверено: ' + d.sent + ', найдено: ' + (d.found_count || 0), 'success');
-            const m = d.merged || {};
-            addLog('📊 +' + (m.added_nodes||0) + ' nodes, +' + (m.added_edges||0) + ' edges', 'info');
-        }
-    } catch (e) { addLog('grow: ' + e, 'error'); }
-}
-async function showMap() {
-    try {
-        const r = await fetch('/api/network/map');
-        const d = await r.json();
-        if (d.success) {
-            const m = d.map || {};
-            const n = Object.keys(m.nodes || {}).length;
-            const e = (m.edges || []).length;
-            addLog('🗺️ Карта: ' + n + ' узлов, ' + e + ' рёбер', 'success');
-            const sample = Object.entries(m.nodes || {}).slice(0, 10);
-            for (const [id, info] of sample) {
-                addLog('  • ' + id + ' (' + (info.type || '?') + ')', 'info');
-            }
-        }
-    } catch (e) { addLog('map: ' + e, 'error'); }
-}
-
-function generateQR() {
-  fetch('/api/qr').then(r => r.json()).then(d => {
-    if (d.success) {
-      const img = document.getElementById('qrImage');
-      img.src = d.qr_url + '?t=' + Date.now();
-      img.style.display = 'block';
-      document.getElementById('qrPlaceholder').style.display = 'none';
-      addLog('QR готов', 'success');
-    }
-  });
-}
-function copyNodeId() {
-  if (currentUser && navigator.clipboard) {
-    navigator.clipboard.writeText(currentUser.node_id || '');
-    addLog('ID скопирован', 'success');
+function updateInboxBadge() {
+  const b = $('inboxBadge');
+  if (!b) return;
+  if (state.inboxCount > 0) {
+    b.textContent = state.inboxCount;
+    b.style.display = 'inline-block';
+  } else {
+    b.style.display = 'none';
   }
 }
-function addContactFromQR() {
-  const raw = document.getElementById('qrImportData').value.trim();
-  if (!raw) return;
+
+// === API ===
+async function fetchOrganism() {
   try {
-    const q = JSON.parse(raw);
-    fetch('/api/contacts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({qr_data:q}) }).then(r => r.json()).then(d => {
-      addLog(d.added ? '✅ Контакт добавлен' : 'Уже есть', d.added ? 'success' : 'warn');
-      loadContacts();
-    });
-  } catch (e) { addLog('Неверный формат', 'error'); }
-}
-function removeContact(id) { fetch('/api/contacts/' + id, { method:'DELETE' }).then(() => loadContacts()); }
-function loadContacts() {
-  fetch('/api/contacts').then(r => r.json()).then(d => {
-    const cs = d.contacts || [];
-    document.getElementById('contactsCount').textContent = cs.length;
-    document.getElementById('contactsList').innerHTML = cs.length
-      ? cs.map(c => '<div class="list-item"><span>' + (c.username || '?') + ' <span style="color:var(--dim);font-size:0.8em">' + (c.node_id || '') + '</span></span><button class="del" onclick="removeContact(\'' + c.node_id + '\')">×</button></div>').join('')
-      : '<div class="empty">Нет контактов</div>';
-  });
+    const r = await fetch('/api/organism');
+    const d = await r.json();
+    if (d.success) {
+      state.organism = d;
+      renderMetrics(d);
+      renderPhases(d);
+      renderNodes(d);
+    }
+  } catch (e) {}
 }
 
-async function loadAIStats() {
-    try {
-        const r = await fetch('/api/ai/stats');
-        const d = await r.json();
-        if (!d.success) return;
-        const sel = d.selector || {};
-        const protos = d.protocols || {};
-        const best = sel.best_protocol || '—';
-        const bestScore = sel.best_score || 0;
-        document.getElementById('aiBestName').textContent = best;
-        document.getElementById('aiBestScore').textContent = bestScore.toFixed(3);
-        document.getElementById('aiBestBar').style.width = Math.round(bestScore * 100) + '%';
-        addLog('AI: ' + best + ' score=' + bestScore.toFixed(2), 'success');
-    } catch (e) { addLog('AI: ' + e, 'error'); }
-}
-async function resetAI() {
-    try {
-        await fetch('/api/ai/reset', { method: 'POST' });
-        addLog('AI reset', 'success');
-        loadAIStats();
-    } catch (e) {}
-}
-
-async function addTrusted() {
-    const host = document.getElementById('capsuleHostInput').value.trim();
-    const label = document.getElementById('capsuleLabelInput').value.trim();
-    if (!host) { addLog('Введите host', 'error'); return; }
-    try {
-        const r = await fetch('/api/capsule/trusted', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, label}) });
-        const d = await r.json();
-        if (d.success) { addLog('Добавлено: ' + host, 'success'); loadCapsuleStats(); }
-    } catch (e) {}
-}
-async function removeTrusted(host) {
-    try {
-        await fetch('/api/capsule/trusted', { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host}) });
-        loadCapsuleStats();
-    } catch (e) {}
-}
-async function deployAll() {
-    try {
-        const r = await fetch('/api/capsule/stats');
-        const d = await r.json();
-        const hosts = (d.stats && d.stats.trusted_hosts) || [];
-        if (!hosts.length) { addLog('Нет доверенных', 'warn'); return; }
-        for (const h of hosts) {
-            const r2 = await fetch('/api/capsule/deploy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host: h.host}) });
-            const d2 = await r2.json();
-            addLog((d2.success ? '✅ ' : '❌ ') + h.host, d2.success ? 'success' : 'error');
-        }
-    } catch (e) {}
-}
-async function loadCapsuleStats() {
-    try {
-        const r = await fetch('/api/capsule/stats');
-        const d = await r.json();
-        if (!d.success) return;
-        const hosts = (d.stats && d.stats.trusted_hosts) || [];
-        const el = document.getElementById('capsuleList');
-        if (hosts.length) {
-            el.innerHTML = hosts.map(h => '<div class="list-item"><span>' + (h.label || h.host) + ' <span style="color:var(--dim);font-size:0.8em">' + h.host + '</span></span><button class="del" onclick="removeTrusted(\'' + h.host + '\')">×</button></div>').join('');
-        } else {
-            el.innerHTML = '<div class="empty">Нет доверенных</div>';
-        }
-        const dep = (d.stats && d.stats.deployer) || {};
-        document.getElementById('capsuleStats').textContent = 'Попыток: ' + (dep.attempts || 0) + ' | Успех: ' + (dep.success || 0) + ' | Отказ: ' + (dep.failed || 0);
-    } catch (e) {}
-}
-async function deployAllNodes() {
-    if (!confirm('Развернуть капсулу на ВСЕ найденные узлы?')) return;
-    addLog('Deploy to ALL nodes...', 'warn');
-    try {
-        const r = await fetch('/api/capsule/deploy_all', { method: 'POST' });
-        const d = await r.json();
-        if (d.success) {
-            addLog('Deployed: ' + d.deployed + ' | Failed: ' + d.failed + ' | Skipped: ' + d.skipped, 'success');
-        }
-    } catch (e) {}
-}
-
-checkAuth();
-async function updatePublicAddr() {
+async function fetchPublic() {
   try {
     const r = await fetch('/api/network/public');
     const d = await r.json();
-    const ipEl = document.getElementById('public-ip');
-    const natEl = document.getElementById('public-nat');
-    if (!ipEl) return;
-    if (d && d.success) {
-      ipEl.textContent = d.public_ip + ':' + d.public_port;
-      natEl.textContent = '(' + d.nat_type + ')';
-      natEl.className = 'nat ' + (d.nat_type === 'cone' ? 'nat-cone' : 'nat-sym');
-    } else {
-      ipEl.textContent = '...';
-      natEl.textContent = '';
-    }
-  } catch(e) {}
+    if (d.success) $('hdrNat').textContent = d.nat_type || '-';
+  } catch (e) {}
 }
-updatePublicAddr();
-setInterval(updatePublicAddr, 30000);
 
-setInterval(loadInbox, 10000);
-addLog('InevioNet загружен', 'info');
+
+
+// === RENDER ===
+function renderMetrics(org) {
+  const s = org.stats || {};
+  const m = org.memory || {};
+  // P100c: реальное число узлов в памяти (не накопительное)
+  const realNodes = m.nodes_count || s.nodes_found || 0;
+  $('mNodes').textContent = realNodes;
+  $('mTaught').textContent = s.nodes_taught || 0;
+  $('mRelayed').textContent = s.nodes_relayed || 0;
+  $('mCapsuled').textContent = s.nodes_capsuled || 0;
+  $('mDepth').textContent = s.max_depth || 0;
+  $('mStego').textContent = s.stego_sent || 0;
+  $('hdrNodes').textContent = realNodes;
+  $('hdrDepth').textContent = s.max_depth || 0;
+  $('hdrCycles').textContent = s.cycles || 0;
+}
+
+function renderPhases(org) {
+  const phases = (org.phase_log || []).slice().reverse().slice(0, 15);
+  const el = $('phaseList');
+  if (!phases.length) { el.innerHTML = '<div class="empty">Нет данных</div>'; return; }
+  el.innerHTML = phases.map(p => {
+    const ts = new Date(p.ts * 1000).toLocaleTimeString('ru-RU');
+    const extra = p.extra ? ' ' + p.extra : '';
+    return '<div class="phase-item"><span class="ph">' + (p.phase || '?') + '</span> ' + ts + extra + '</div>';
+  }).join('');
+}
+
+function renderNodes(org) {
+  const nodes = org.nodes || org.nodes_sample || [];
+  const el = $('nodeList');
+  const realCount = (org.memory && org.memory.nodes_count) || nodes.length;
+  $('nodeCount').textContent = realCount;
+  if (!nodes.length) { el.innerHTML = '<div class="empty">Нет узлов</div>'; return; }
+  // Показываем топ-50 (по depth)
+  const top = nodes.slice(0, 50);
+  el.innerHTML = top.map(item => {
+    const ip = item[0];
+    const node = item[1];
+    const type = node.type || '?';
+    const plan = node.nlp_plan || 'route';
+    const depth = node.depth !== undefined ? node.depth : '?';
+    return '<div class="node-item" data-ip="' + ip + '">' +
+      '<span class="badge" style="background:' + colorForType(type) + '"></span>' +
+      '<div class="info">' +
+        '<div class="ip">' + ip + '</div>' +
+        '<div class="type">' + type + ' &middot; d' + depth + '</div>' +
+      '</div>' +
+      '<span class="plan ' + planClass(plan) + '">' + plan + '</span>' +
+    '</div>';
+  }).join('');
+  if (nodes.length > 50) {
+    el.innerHTML += '<div class="empty" style="padding:8px">... и ещё ' + (nodes.length - 50) + '</div>';
+  }
+  el.querySelectorAll('.node-item').forEach(item => {
+    item.onclick = () => selectNode(item.dataset.ip);
+  });
+}
+
+function selectNode(ip) {
+  if (!state.organism) return;
+  const nodes = state.organism.nodes || state.organism.nodes_sample || [];
+  const found = nodes.find(n => n[0] === ip);
+  if (!found) return;
+  state.selected = found;
+  renderDetail(found[1]);
+  switchToTab('detail');
+  document.querySelectorAll('.node-item').forEach(i => {
+    i.classList.toggle('active', i.dataset.ip === ip);
+  });
+}
+
+function renderClusterDetail(cluster) {
+  const ips = cluster.clusterIps || [];
+  const list = ips.slice(0, 50).map(ip => '<div class="detail-row"><span class="l">' + ip + '</span><span class="v">ISP</span></div>').join('');
+  $('detailPanel').innerHTML =
+    '<div class="detail-header">' +
+      '<div class="detail-ip">' + cluster.node.prefix + '.0/24</div>' +
+      '<div class="detail-meta">' +
+        '<span class="tag purple">ISP CLUSTER</span>' +
+        '<span class="tag">' + cluster.clusterCount + ' hosts</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="nlp-block">' +
+      '<div class="nlp-title">&#x1F310; Узлы кластера</div>' +
+      list +
+      (ips.length > 50 ? '<div class="empty" style="padding:8px">... +' + (ips.length - 50) + '</div>' : '') +
+    '</div>';
+}
+
+function renderDetail(node) {
+  const ip = node.ip || '?';
+  const type = node.type || '?';
+  const plan = node.nlp_plan || 'route';
+  const conf = (node.nlp_confidence || 0).toFixed(2);
+  const leading = node.nlp_leading || '?';
+  const rapport = (node.nlp_rapport || 0).toFixed(2);
+  const controllable = node.nlp_controllable ? 'да' : 'нет';
+  const depth = node.depth || '?';
+  const source = node.source || '?';
+  const vendor = node.vendor || '-';
+  const planColor = {
+    teach:'var(--success)', relay:'var(--accent)',
+    capsule:'var(--warn)', route:'var(--dim)', skip:'var(--error)'
+  }[plan] || 'var(--dim)';
+  $('detailPanel').innerHTML = 
+    '<div class="detail-header">' +
+      '<div class="detail-ip">' + ip + '</div>' +
+      '<div class="detail-meta">' +
+        '<span class="tag blue">' + type + '</span>' +
+        '<span class="tag">depth ' + depth + '</span>' +
+        '<span class="tag">' + source + '</span>' +
+        (vendor !== '-' ? '<span class="tag purple">' + vendor + '</span>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div class="nlp-block">' +
+      '<div class="nlp-title">&#x1F9E0; НЛП-анализ</div>' +
+      '<div class="nlp-plan">' +
+        '<span class="name" style="color:' + planColor + '">' + plan.toUpperCase() + '</span>' +
+        '<span class="conf">conf ' + conf + '</span>' +
+      '</div>' +
+      '<div class="nlp-bar"><div class="nlp-bar-fill" style="width:' + (conf * 100) + '%"></div></div>' +
+      '<div class="detail-row" style="margin-top:10px"><span class="l">Leading</span><span class="v">' + leading + '</span></div>' +
+      '<div class="detail-row"><span class="l">Rapport</span><span class="v">' + rapport + '</span></div>' +
+      '<div class="detail-row"><span class="l">Controllable</span><span class="v">' + controllable + '</span></div>' +
+    '</div>' +
+    '<div class="nlp-block">' +
+      '<div class="nlp-title">&#x1F50D; Свойства</div>' +
+      '<div class="detail-row"><span class="l">IP</span><span class="v">' + ip + '</span></div>' +
+      '<div class="detail-row"><span class="l">Type</span><span class="v">' + type + '</span></div>' +
+      '<div class="detail-row"><span class="l">Source</span><span class="v">' + source + '</span></div>' +
+      '<div class="detail-row"><span class="l">Depth</span><span class="v">' + depth + '</span></div>' +
+      '<div class="detail-row"><span class="l">Score</span><span class="v">' + (node.score || 0).toFixed(2) + '</span></div>' +
+    '</div>';
+}
+
+// === INBOX ===
+async function loadInbox() {
+  try {
+    const r = await fetch('/api/p2/inbox');
+    const d = await r.json();
+    const msgs = d.messages || [];
+    const el = $('inboxList');
+    if (!msgs.length) {
+      el.innerHTML = '<div class="empty">Пока пусто</div>';
+      return;
+    }
+    el.innerHTML = msgs.slice().reverse().map(m => {
+      const t = new Date((m.ts || 0) * 1000).toLocaleTimeString('ru-RU');
+      return '<div class="msg-card">' +
+        '<div class="msg-head">' +
+          '<span class="msg-from">' + (m.sender || '?') + '</span>' +
+          '<span class="msg-time">' + t + '</span>' +
+        '</div>' +
+        '<div class="msg-text">' + escapeHtml(m.message || '') + '</div>' +
+      '</div>';
+    }).join('');
+  } catch (e) {}
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// === SEND ===
+async function sendMessage() {
+  const receiver = $('sendReceiver').value.trim();
+  const message = $('sendMessage').value.trim();
+  if (!receiver || !message) {
+    $('sendResult').innerHTML = '<span style="color:var(--error)">Заполните все поля</span>';
+    return;
+  }
+  $('sendResult').textContent = 'Отправка...';
+  try {
+    const r = await fetch('/api/p2/send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({receiver, message})
+    });
+    const d = await r.json();
+    if (d.success) {
+      $('sendResult').innerHTML = '<span style="color:var(--success)">Отправлено' +
+        (d.via ? ' через ' + d.via : '') + '</span>';
+      $('sendMessage').value = '';
+      addLog('Отправлено ' + receiver, 'success');
+    } else {
+      $('sendResult').innerHTML = '<span style="color:var(--error)">' + (d.error || 'Ошибка') + '</span>';
+    }
+  } catch (e) {
+    $('sendResult').innerHTML = '<span style="color:var(--error)">' + e.message + '</span>';
+  }
+}
+
+async function quickPing() {
+  const target = $('sendReceiver').value.trim();
+  if (!target) { $('sendResult').textContent = 'Введите получателя'; return; }
+  $('sendResult').textContent = 'Проверка ' + target + '...';
+  try {
+    const r = await fetch('/api/probe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target})
+    });
+    const d = await r.json();
+    $('sendResult').textContent = 'OK: ' + JSON.stringify(d).slice(0, 100);
+  } catch (e) {
+    $('sendResult').textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+async function quickBootstrap() {
+  $('sendResult').textContent = 'Публикация Seed...';
+  try {
+    const r = await fetch('/api/bootstrap/seed', {method: 'POST'});
+    const d = await r.json();
+    if (d.success && d.url) {
+      $('sendResult').innerHTML = 'Seed: <a href="' + d.url + '" target="_blank" style="color:var(--accent)">' + d.url + '</a>';
+      if (navigator.clipboard) navigator.clipboard.writeText(d.url);
+    } else {
+      $('sendResult').textContent = 'Ошибка: ' + (d.error || '?');
+    }
+  } catch (e) {
+    $('sendResult').textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+async function showBootstrapStatus() {
+  try {
+    const r = await fetch('/api/bootstrap/status');
+    const d = await r.json();
+    $('sendResult').textContent = 'NAT: ' + (d.nat_type || '?') +
+      ' | Public: ' + JSON.stringify(d.public_addr || []) +
+      ' | Sprout: ' + JSON.stringify(d.sprout || {}).slice(0, 80);
+  } catch (e) {}
+}
+
+// === CONTACTS ===
+async function loadContacts() {
+  try {
+    const r = await fetch('/api/contacts');
+    const d = await r.json();
+    const contacts = d.contacts || [];
+    $('contactsCount').textContent = contacts.length;
+    const el = $('contactsList');
+    if (!contacts.length) {
+      el.innerHTML = '<div class="empty">Нет контактов</div>';
+      return;
+    }
+    el.innerHTML = contacts.map(c =>
+      '<div class="contact-card">' +
+        '<div class="contact-info">' +
+          '<div class="contact-name">' + escapeHtml(c.username || '?') + '</div>' +
+          '<div class="contact-node">' + (c.node_id || '') + '</div>' +
+        '</div>' +
+        '<button class="btn-icon-sm" onclick="removeContact(\'' + c.node_id + '\')" title="Удалить">&#x2715;</button>' +
+      '</div>'
+    ).join('');
+  } catch (e) {}
+}
+
+async function removeContact(nodeId) {
+  try {
+    await fetch('/api/contacts/' + nodeId, {method: 'DELETE'});
+    loadContacts();
+    addLog('Контакт удалён: ' + nodeId, 'info');
+  } catch (e) {}
+}
+
+async function addContactFromQR() {
+  const raw = $('qrImportData').value.trim();
+  if (!raw) return;
+  try {
+    const qr = JSON.parse(raw);
+    const r = await fetch('/api/contacts', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({qr_data: qr})
+    });
+    const d = await r.json();
+    if (d.success) {
+      addLog(d.added ? 'Контакт добавлен' : 'Уже есть', d.added ? 'success' : 'warn');
+      $('qrImportData').value = '';
+      loadContacts();
+    }
+  } catch (e) {
+    addLog('Неверный JSON', 'error');
+  }
+}
+
+async function generateQR() {
+  try {
+    const r = await fetch('/api/qr');
+    const d = await r.json();
+    if (d.success && d.qr_url) {
+      const img = $('qrImage');
+      img.src = d.qr_url + '?t=' + Date.now();
+      img.style.display = 'block';
+      $('qrPlaceholder').style.display = 'none';
+    }
+  } catch (e) {}
+}
+
+function copyMyNodeId() {
+  const nid = $('myNodeId').textContent;
+  if (nid && nid !== '-' && navigator.clipboard) {
+    navigator.clipboard.writeText(nid);
+    addLog('Node ID скопирован', 'success');
+  }
+}
+
+// === SOCKET ===
+function initSocket() {
+  if (typeof io === 'undefined') return;
+  const socket = io();
+  socket.on('connect', () => {
+    $('statusDot').classList.add('on');
+    $('statusText').textContent = 'Подключено';
+    addLog('WebSocket подключён', 'success');
+    socket.emit('request_stats');
+  });
+  socket.on('disconnect', () => {
+    $('statusDot').classList.remove('on');
+    $('statusText').textContent = 'Отключено';
+    addLog('WebSocket отключён', 'error');
+  });
+  socket.on('server_log', d => {
+    const lvl = d.level === 'ERROR' ? 'error' : (d.level === 'WARNING' ? 'warn' : 'info');
+    addLog(d.msg, lvl);
+  });
+  socket.on('inbox_new', m => {
+    state.inboxCount++;
+    updateInboxBadge();
+    loadInbox();
+    addLog('Новое сообщение от ' + (m.sender || '?'), 'success');
+  });
+}
+
+// === CANVAS ===
+function initCanvas() {
+  const c = $('canvas');
+  state.canvas = c;
+  state.ctx = c.getContext('2d');
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    const d = e.deltaY > 0 ? 0.92 : 1.08;
+    state.camera.zoom = Math.max(0.15, Math.min(6, state.camera.zoom * d));
+  }, {passive: false});
+  c.addEventListener('mousedown', e => {
+    state.dragging = true;
+    state.dragStart = {x: e.clientX - state.camera.x, y: e.clientY - state.camera.y};
+  });
+  window.addEventListener('mousemove', e => {
+    if (state.dragging) {
+      state.camera.x = e.clientX - state.dragStart.x;
+      state.camera.y = e.clientY - state.dragStart.y;
+    }
+  });
+  window.addEventListener('mouseup', () => { setTimeout(() => state.dragging = false, 50); });
+  c.addEventListener('click', e => {
+    if (state.dragging) return;
+    const rect = c.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const wx = (mx - state.camera.x) / state.camera.zoom;
+    const wy = (my - state.camera.y) / state.camera.zoom;
+    for (const s of state.stars) {
+      const dx = s.x - wx, dy = s.y - wy;
+      if (dx*dx + dy*dy < (s.r + 8) * (s.r + 8)) {
+        // P101: клик по кластеру ISP — показать IP
+        if (s.isCluster) {
+          renderClusterDetail(s);
+          switchToTab('detail');
+        } else {
+          selectNode(s.ip);
+        }
+        return;
+      }
+    }
+  });
+  animate();
+}
+
+function resizeCanvas() {
+  const c = state.canvas;
+  if (!c) return;
+  c.width = c.clientWidth * window.devicePixelRatio;
+  c.height = c.clientHeight * window.devicePixelRatio;
+  if (!state.camera.x && !state.camera.y) {
+    state.camera.x = c.width / 2;
+    state.camera.y = c.height / 2;
+  }
+}
+
+function rebuildStars() {
+  // P118: читаем из organism.nodes (100), fallback на nodes_sample (10)
+  const org = state.organism || {};
+  let nodes = org.nodes || org.nodes_sample || [];
+  
+  // P118: если nodes пусто — пробуем tree
+  if (!nodes.length && state.tree && state.tree.root) {
+    const flat = [];
+    const walk = (n) => {
+      flat.push([n.node_id || n.ip || 'unknown', {
+        type: n.node_type || n.type || 'device',
+        depth: n.depth || 1,
+        parent: n.via || null,
+        ip: n.ip || '',
+        vendor: n.vendor || '',
+      }]);
+      if (n.children) n.children.forEach(walk);
+    };
+    walk(state.tree.root);
+    nodes = flat;
+  }
+  
+  console.log('[Tree] rebuildStars: nodes=' + nodes.length + ', sample=' + (org.nodes_sample?.length || 0));
+  
+  // Строим дерево
+  const childrenOf = {};
+  nodes.forEach(item => {
+    const ip = item[0];
+    const node = item[1];
+    const parent = node.parent || '127.0.0.1';
+    if (!childrenOf[parent]) childrenOf[parent] = [];
+    childrenOf[parent].push({ ip, node });
+  });
+  
+  const stars = [];
+  const seen = {};
+  
+  // SELF — центр
+  const selfItem = nodes.find(n => n[1].type === 'self' || n[0] === '127.0.0.1');
+  if (selfItem) {
+    seen[selfItem[0]] = true;
+    stars.push({
+      ip: selfItem[0], node: selfItem[1], type: 'self', depth: 0,
+      x: 0, y: 0, r: 20,
+      color: colorForType('self'),
+      pulse: Math.random() * Math.PI * 2,
+      parent: null,
+      label: selfItem[0],
+    });
+  }
+  
+  // Секторная раскладка
+  const sectorA = [];  // LAN/router/service
+  const sectorB = [];  // InevioNet
+  const ispClusters = {};
+  
+  nodes.forEach(item => {
+    const ip = item[0];
+    const node = item[1];
+    const type = node.type || 'device';
+    if (type === 'self' || seen[ip]) return;
+    seen[ip] = true;
+    if (type === 'lan_device' || type === 'service' || type === 'router') {
+      sectorA.push(item);
+    } else if (type === 'inevionet') {
+      sectorB.push(item);
+    } else if (type === 'isp_router') {
+      const parts = ip.split('.');
+      const prefix = parts.length === 4 ? parts[0]+'.'+parts[1]+'.'+parts[2] : ip;
+      if (!ispClusters[prefix]) ispClusters[prefix] = { prefix, ips: [] };
+      ispClusters[prefix].ips.push(ip);
+    } else {
+      sectorA.push(item);
+    }
+  });
+  
+  // LAN — сектор A
+  const aCount = sectorA.length;
+  sectorA.forEach((item, i) => {
+    const ip = item[0];
+    const node = item[1];
+    const type = node.type || 'device';
+    const angle = -Math.PI/4 + (Math.PI/2) * (aCount > 1 ? i/(aCount-1) : 0.5);
+    let radius = type === 'router' ? 130 : 220 + (i % 3) * 40;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    let r = 6;
+    if (type === 'router') r = 12;
+    stars.push({
+      ip, node, type, depth: 1,
+      x, y, r,
+      color: colorForType(type),
+      pulse: Math.random() * Math.PI * 2,
+      parent: '127.0.0.1',
+      label: ip,
+    });
+  });
+  
+  // InevioNet — сектор B
+  const bCount = sectorB.length;
+  sectorB.forEach((item, i) => {
+    const ip = item[0];
+    const node = item[1];
+    const angle = Math.PI/4 + (Math.PI/2) * (bCount > 1 ? i/(bCount-1) : 0.5);
+    const radius = 200;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    stars.push({
+      ip, node, type: 'inevionet', depth: 1,
+      x, y, r: 14,
+      color: colorForType('inevionet'),
+      pulse: Math.random() * Math.PI * 2,
+      parent: '127.0.0.1',
+      label: ip,
+    });
+  });
+  
+  // ISP-кластеры
+  const clusterKeys = Object.keys(ispClusters).sort();
+  const dCount = clusterKeys.length;
+  clusterKeys.forEach((key, i) => {
+    const cl = ispClusters[key];
+    const angle = Math.PI * (0.5 + (dCount > 1 ? i/(dCount-1) : 0.5) * 0.9);
+    const radius = 260 + (i % 4) * 35;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    const size = Math.min(16, 7 + Math.log2(cl.ips.length + 1) * 2);
+    stars.push({
+      ip: key + '.0',
+      node: { type: 'isp_router', depth: 2, ips: cl.ips, count: cl.ips.length, prefix: key },
+      type: 'isp_router', depth: 2,
+      x, y, r: size,
+      color: colorForType('isp_router'),
+      pulse: Math.random() * Math.PI * 2,
+      parent: '127.0.0.1',
+      label: key + '.0/24 (' + cl.ips.length + ')',
+      isCluster: true,
+      clusterIps: cl.ips,
+      clusterCount: cl.ips.length,
+    });
+  });
+  
+  state.stars = stars;
+  console.log('[Tree] stars created: ' + stars.length);
+}
+
+function getCluster(type) {
+  if (type === 'lan_device' || type === 'service' || type === 'router') return 0;
+  if (type === 'isp_router') return 1;
+  if (type === 'inevionet') return 2;
+  if (type === 'spore') return 3;
+  return 0;
+}
+
+function hashAngle(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h = h & h;
+  }
+  return (Math.abs(h) % 360) * Math.PI / 180;
+}
+
+function animate() {
+  const c = state.canvas;
+  const ctx = state.ctx;
+  if (!c || !ctx) return;
+  ctx.fillStyle = '#0a0d14';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.save();
+  ctx.translate(state.camera.x, state.camera.y);
+  ctx.scale(state.camera.zoom, state.camera.zoom);
+  
+  const pm = {};
+  state.stars.forEach(s => pm[s.ip] = s);
+  
+  // Рёбра по parent (tree)
+  ctx.lineWidth = 1;
+  state.stars.forEach(s => {
+    if (s.type === 'self') return;
+    const p = s.parent && pm[s.parent];
+    // Если parent нет — связь с self
+    const parent = p || pm['127.0.0.1'];
+    if (!parent) return;
+    ctx.strokeStyle = s.color + '33';
+    ctx.beginPath();
+    ctx.moveTo(parent.x, parent.y);
+    ctx.lineTo(s.x, s.y);
+    ctx.stroke();
+  });
+  
+  // Узлы
+  state.stars.forEach(s => {
+    s.pulse += 0.03;
+    const pr = s.r * (1 + Math.sin(s.pulse) * 0.12);
+    
+    // Glow
+    const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, pr * 3.5);
+    grad.addColorStop(0, s.color + '70');
+    grad.addColorStop(1, s.color + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, pr * 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Core
+    ctx.fillStyle = s.color;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, pr, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Self — белый центр
+    if (s.type === 'self') {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, pr * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // P101: кластер ISP — кольцо вокруг
+    if (s.isCluster) {
+      ctx.strokeStyle = s.color + 'aa';
+      ctx.lineWidth = 2 / state.camera.zoom;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, pr + 6 / state.camera.zoom, 0, Math.PI * 2);
+      ctx.stroke();
+      // Число внутри
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold ' + Math.max(9, 11 / state.camera.zoom) + 'px -apple-system,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(s.clusterCount, s.x, s.y + 1 / state.camera.zoom);
+      ctx.textBaseline = 'alphabetic';
+    }
+    
+    // P101: подписи
+    const showLabel = s.type === 'self' || s.type === 'router' ||
+                      s.type === 'inevionet' || s.isCluster ||
+                      (s.r >= 6 && state.camera.zoom > 0.4);
+    if (showLabel && state.camera.zoom > 0.3) {
+      ctx.font = Math.max(9, 11 / state.camera.zoom) + 'px -apple-system,sans-serif';
+      ctx.fillStyle = s.type === 'self' ? 'rgba(255,255,255,0.95)' :
+                      s.isCluster ? 'rgba(163,113,247,0.95)' :
+                      'rgba(230,237,243,0.75)';
+      ctx.textAlign = 'center';
+      const labelY = s.isCluster ? s.y - pr - 8 / state.camera.zoom :
+                                   s.y + pr + 12 / state.camera.zoom;
+      ctx.fillText(s.label, s.x, labelY);
+    }
+  });
+  
+  ctx.restore();
+  requestAnimationFrame(animate);
+}
+
+// === ACTIONS ===
+function resetView() {
+  state.camera.x = state.canvas.width / 2;
+  state.camera.y = state.canvas.height / 2;
+  state.camera.zoom = 1;
+}
+
+function fitView() {
+  if (!state.stars.length) return;
+  const xs = state.stars.map(s => s.x);
+  const ys = state.stars.map(s => s.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const w = maxX - minX + 100, h = maxY - minY + 100;
+  const zoom = Math.min(state.canvas.width / w, state.canvas.height / h);
+  state.camera.zoom = Math.max(0.15, Math.min(3, zoom));
+  state.camera.x = state.canvas.width / 2 - (minX + maxX) / 2 * state.camera.zoom;
+  state.camera.y = state.canvas.height / 2 - (minY + maxY) / 2 * state.camera.zoom;
+}
+
+function toggleLayout() {
+  // P101: только tree (кластеры)
+  const layouts = ['tree'];
+  state.layout = 'tree';
+  rebuildStars();
+  setTimeout(fitView, 200);
+  addLog('Раскладка: tree (ISP кластеры)', 'info');
+}
+
+// === INIT ===
+async function init() {
+  addLog('InevioNet UI загружен', 'info');
+  initTabs();
+  initCanvas();
+  initSocket();
+  await checkAuth();
+  await fetchOrganism();
+  await fetchPublic();
+  if (state.currentUser) {
+    await loadInbox();
+    await loadContacts();
+    await fetchDhtMyInfo();
+    await fetchDhtPeers();
+    await fetchTrustList();
+  }
+  rebuildStars();
+  setTimeout(fitView, 500);
+  setInterval(fetchOrganism, CFG.ORG_MS);
+  setInterval(fetchPublic, 30000);
+  setInterval(loadInbox, CFG.INBOX_MS);
+  setInterval(rebuildStars, 3000);
+}
+
+
+// === AUTH (P102) ===
+function showAuth() {
+  $('authOverlay').classList.add('show');
+}
+function hideAuth() {
+  $('authOverlay').classList.remove('show');
+}
+function setAuthTab(name) {
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+  $('auth' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+}
+async function doLogin() {
+  const u = $('loginUser').value.trim();
+  const p = $('loginPass').value;
+  if (!u || !p) { $('authError').textContent = 'Заполните поля'; return; }
+  try {
+    const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})});
+    const d = await r.json();
+    if (d.success) {
+      state.currentUser = d.user;
+      hideAuth();
+      updateUserBar();
+      await loadContacts();
+      addLog('Добро пожаловать, ' + u, 'success');
+    } else {
+      $('authError').textContent = d.error || 'Ошибка';
+    }
+  } catch (e) { $('authError').textContent = e.message; }
+}
+async function doRegister() {
+  const u = $('regUser').value.trim();
+  const p = $('regPass').value;
+  const p2 = $('regPass2').value;
+  if (!u || !p) { $('authError').textContent = 'Заполните поля'; return; }
+  if (p !== p2) { $('authError').textContent = 'Пароли не совпадают'; return; }
+  if (p.length < 4) { $('authError').textContent = 'Пароль минимум 4 символа'; return; }
+  try {
+    const r = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})});
+    const d = await r.json();
+    if (d.success) {
+      state.currentUser = d.user;
+      hideAuth();
+      updateUserBar();
+      await loadContacts();
+      addLog('Аккаунт создан: ' + u, 'success');
+    } else {
+      $('authError').textContent = d.error || 'Ошибка';
+    }
+  } catch (e) { $('authError').textContent = e.message; }
+}
+async function doLogout() {
+  await fetch('/api/logout', {method:'POST'});
+  state.currentUser = null;
+  showAuth();
+  $('loginUser').value = '';
+  $('loginPass').value = '';
+}
+function updateUserBar() {
+  const u = state.currentUser;
+  if (u) {
+    $('myUsername').textContent = u.username || '-';
+    $('myNodeId').textContent = u.node_id || '-';
+  }
+}
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) {
+      showAuth();
+      return;
+    }
+    const d = await r.json();
+    if (d.success && d.user) {
+      state.currentUser = d.user;
+      hideAuth();
+      updateUserBar();
+      await loadContacts();
+    } else {
+      showAuth();
+    }
+  } catch (e) {
+    showAuth();
+  }
+}
+
+// P113: кнопки Enter в auth-полях
+document.addEventListener('keydown', (e) => {
+  if (!state.currentUser) {
+    if (e.key === 'Enter') {
+      const loginForm = document.getElementById('authLogin');
+      const regForm = document.getElementById('authRegister');
+      if (loginForm && loginForm.classList.contains('active')) {
+        doLogin();
+      } else if (regForm && regForm.classList.contains('active')) {
+        doRegister();
+      }
+    }
+  }
+});
+async function generateQR() {
+  try {
+    const r = await fetch('/api/qr');
+    if (r.status === 401) { showAuth(); return; }
+    const d = await r.json();
+    if (d.success && d.qr_url) {
+      const img = $('qrImage');
+      img.src = d.qr_url + '?t=' + Date.now();
+      img.style.display = 'block';
+      img.onload = () => addLog('QR готов', 'success');
+      img.onerror = () => addLog('QR не загрузился', 'error');
+      $('qrPlaceholder').style.display = 'none';
+    } else {
+      addLog('Ошибка QR: ' + (d.error || '?'), 'error');
+    }
+  } catch (e) { addLog('QR: ' + e.message, 'error'); }
+}
+function copyMyNodeId() {
+  const nid = $('myNodeId').textContent;
+  if (nid && nid !== '-' && navigator.clipboard) {
+    navigator.clipboard.writeText(nid);
+    addLog('Node ID скопирован: ' + nid, 'success');
+  }
+}
+async function addContactFromQR() {
+  const raw = $('qrImportData').value.trim();
+  if (!raw) { addLog('Вставьте JSON', 'warn'); return; }
+  try {
+    const qr = JSON.parse(raw);
+    const r = await fetch('/api/contacts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({qr_data: qr})});
+    const d = await r.json();
+    if (d.success) {
+      addLog(d.added ? 'Контакт добавлен' : 'Уже есть', d.added ? 'success' : 'warn');
+      $('qrImportData').value = '';
+      await loadContacts();
+    } else {
+      addLog('Ошибка: ' + (d.error || '?'), 'error');
+    }
+  } catch (e) { addLog('Неверный JSON: ' + e.message, 'error'); }
+}
+
+// auth tabs
+document.querySelectorAll('.auth-tab').forEach(t => {
+  t.onclick = () => setAuthTab(t.dataset.tab);
+});
+
+
+// === DHT (P103b) ===
+async function fetchDhtMyInfo() {
+  try {
+    const r = await fetch('/api/dht/my_info');
+    const d = await r.json();
+    if (!d.success) return;
+    const info = d.info || {};
+    const myJson = d.json || '';
+    if ($('mySerial')) $('mySerial').textContent = info.serial || '—';
+    if ($('myNodeIdDht')) $('myNodeIdDht').textContent = info.node_id || '—';
+    if ($('myPublic')) $('myPublic').textContent = (info.public_ip || '') + ':' + (info.public_port || '');
+    if ($('myNat')) $('myNat').textContent = info.nat_type || '—';
+    if ($('myRelays')) $('myRelays').textContent = info.relay_count || 0;
+    if ($('myJson')) $('myJson').value = myJson;
+  } catch (e) {}
+}
+
+async function fetchDhtPeers() {
+  try {
+    const r = await fetch('/api/dht/peers');
+    const d = await r.json();
+    if (!d.success) return;
+    const peers = d.peers || [];
+    const stats = d.stats || {};
+    if ($('dhtPeersCount')) $('dhtPeersCount').textContent = peers.length;
+    if ($('dhtTotalNodes')) $('dhtTotalNodes').textContent = stats.total_nodes || 0;
+    if ($('dhtTotalRelays')) $('dhtTotalRelays').textContent = stats.total_relays || 0;
+    const el = $('dhtPeersList');
+    if (!el) return;
+    if (!peers.length) {
+      el.innerHTML = '<div class="empty">Нет peers. Скопируй свой JSON и передай другому узлу.</div>';
+      return;
+    }
+    el.innerHTML = peers.map(p =>
+      '<div class="contact-card">' +
+        '<div class="contact-info">' +
+          '<div class="contact-name">' + escapeHtml(p.serial || '?') + ' → ' + (p.node_id || '?') + '</div>' +
+          '<div class="contact-node">' + (p.public_ip || '') + ':' + (p.public_port || '') + ' | реле: ' + (p.relay_count || 0) + '</div>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+  } catch (e) {}
+}
+
+async function copyMyJson() {
+  const el = $('myJson');
+  if (!el || !el.value) return;
+  try {
+    await navigator.clipboard.writeText(el.value);
+    addLog('JSON скопирован. Передай другому узлу.', 'success');
+  } catch (e) {
+    el.select();
+    document.execCommand('copy');
+    addLog('JSON скопирован (fallback)', 'success');
+  }
+}
+
+async function addPeerFromJson() {
+  const raw = $('peerJsonInput').value.trim();
+  if (!raw) { addLog('Вставьте JSON', 'warn'); return; }
+  try {
+    const r = await fetch('/api/dht/bootstrap', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({json: raw})
+    });
+    const d = await r.json();
+    if (d.success) {
+      if (d.added) {
+        addLog('Peer добавлен в DHT!', 'success');
+        $('peerJsonInput').value = '';
+        await fetchDhtPeers();
+      } else {
+        addLog('Peer уже был в DHT', 'warn');
+      }
+    } else {
+      addLog('Ошибка: ' + (d.error || '?'), 'error');
+    }
+  } catch (e) {
+    addLog('Ошибка: ' + e.message, 'error');
+  }
+}
+
+// Обновлять DHT каждые 10 сек
+setInterval(() => {
+  if (state.currentUser) {
+    fetchDhtMyInfo();
+    fetchDhtPeers();
+  }
+}, 10000);
+
+
+// === P111: TRUST / QR ===
+async function addTrustFromJson() {
+  const raw = $('trustJsonInput').value.trim();
+  if (!raw) { addLog('Вставьте JSON', 'warn'); return; }
+  try {
+    let peer;
+    try { peer = JSON.parse(raw); } catch (e) { peer = {node_id: raw}; }
+    const r = await fetch('/api/trust/qr', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({peer})
+    });
+    const d = await r.json();
+    if (d.success) {
+      addLog('Доверенный добавлен: ' + (d.node_id || '?'), 'success');
+      $('trustJsonInput').value = '';
+      await fetchTrustList();
+      await fetchDhtPeers();
+    } else {
+      addLog('Ошибка: ' + (d.error || '?'), 'error');
+    }
+  } catch (e) {
+    addLog('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function fetchTrustList() {
+  try {
+    const r = await fetch('/api/trust/list');
+    const d = await r.json();
+    if (!d.success) return;
+    const hosts = d.hosts || [];
+    if ($('trustCount')) $('trustCount').textContent = hosts.length;
+    const el = $('trustList');
+    if (!el) return;
+    if (!hosts.length) {
+      el.innerHTML = '<div class="empty">Нет доверенных</div>';
+      return;
+    }
+    el.innerHTML = hosts.map(t =>
+      '<div class="contact-card">' +
+        '<div class="contact-info">' +
+          '<div class="contact-name">' + escapeHtml(t.label || '?') + '</div>' +
+          '<div class="contact-node">' + (t.host || '') + ' | ' + (t.method || '?') + '</div>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+  } catch (e) {}
+}
+
+// периодически обновляем
+setInterval(() => {
+  if (state.currentUser) fetchTrustList();
+}, 15000);
+
+
+// === P114: QR ===
+async function showMyQr() {
+  try {
+    const r = await fetch('/api/trust/qr_image');
+    const d = await r.json();
+    if (d.success && d.qr_base64) {
+      const img = $('qrTrustImage');
+      img.src = d.qr_base64;
+      img.style.display = 'block';
+      $('qrTrustPlaceholder').style.display = 'none';
+      addLog('QR готов', 'success');
+    } else {
+      addLog('QR: ' + (d.error || d.hint || '?'), 'warn');
+    }
+  } catch (e) {
+    addLog('QR ошибка: ' + e.message, 'error');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>
