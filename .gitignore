@@ -4,13 +4,14 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+dist_capsule/
 venv/
 .venv/
 .pytest_cache/
 htmlcov/
 .coverage
 
-# ============ ДАННЫЕ И СЕКРЕТЫ (НЕ ПУБЛИКОВАТЬ!) ============
+# ============ ДАННЫЕ И СЕКРЕТЫ ============
 data/
 !data/.gitkeep
 *.key
@@ -29,6 +30,7 @@ audit_chain.json
 super_nodes.json
 spores_findings.json
 tls/
+data_and_logs.txt
 
 # ============ ЛОГИ ============
 logs/
@@ -38,42 +40,49 @@ seed.log
 # ============ БЭКАПЫ ============
 *.bak
 *.bak_p*
-*.bak_p1*
-*.bak_p2*
-*.bak_p3*
-*.bak_p4*
-*.bak_p5*
-*.bak_p6*
-*.bak_p7*
-*.bak_p8*
-*.bak_p9*
-*.bak_p10*
-*.bak_p11*
 _backup_*/
 _backup_refactor_*/
 _backup_organism_*/
 _backup_p*/
 
-# ============ АРХИВЫ И ПЕРЕНОС ============
+# ============ АРХИВЫ / СТАРЫЕ СБОРКИ ============
 _archive_broken/
 _transfer/
 installer_output/
-!installer_output/.gitkeep
+dist_capsule/
+InevioNet_RELEASE/
+deploy/
+drone/
+mobile/
+inevionet_ext/
+examples/
+scripts/
 
-# ============ ПАТЧИ (НЕ ПУБЛИКОВАТЬ!) ============
+# ============ ПАТЧИ И СКРИПТЫ ============
 patch*.py
 patch*.ps1
 fix_*.py
+Fix-InevioNet.ps1
 build_*.py
+build_installer.ps1
 analyze_project.py
 diag_*.py
 debug_*.py
+debug_attrs.py
 _check*.py
 smoke_*.py
 _diag*.py
+_get_feeds.py
+Snapshot-InevioNet.ps1
 publish.ps1
 release.ps1
 cleanup_repo.ps1
+
+# ============ ДАМПЫ ============
+DUMP_FOR_AI.txt
+README_FOR_DUMMIES.md
+START_exe.bat
+audit.py
 
 # ============ IDE / OS ============
 .vscode/
