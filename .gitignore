@@ -35,19 +35,47 @@ logs/
 *.log
 seed.log
 
-# ============ БЭКАПЫ И ПАТЧИ ============
+# ============ БЭКАПЫ (все варианты) ============
 *.bak
 *.bak_p*
 *.bak_p1*
 *.bak_p2*
+*.bak_p3*
+*.bak_p4*
+*.bak_p5*
+*.bak_p6*
+*.bak_p7*
+*.bak_p8*
+*.bak_p9*
+*.bak_p10*
+*.bak_p11*
 _backup_*/
+_backup_refactor_*/
+_backup_organism_*/
+_backup_p*/
+
+# ============ АРХИВЫ И ПЕРЕНОС ============
 _archive_broken/
 _transfer/
-installer_output/
+installer_output/*.exe
+installer_output/*.zip
+
+# ============ ПАТЧИ (НЕ ПУБЛИКОВАТЬ!) ============
 patch*.py
-build_*.py
+patch*.ps1
 fix_*.py
+build_*.py
 analyze_project.py
+diag_*.py
+debug_*.py
+_check*.py
+_check*.py
+smoke_*.py
+diag*.py
+_debug*.py
+_diag*.py
+publish.ps1
+release.ps1
 
 # ============ IDE / OS ============
 .vscode/
